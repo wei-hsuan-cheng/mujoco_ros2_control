@@ -22,7 +22,7 @@ Make sure you have the following software installed if you are running on the lo
 Before build this package configure environment variable for mujoco directory.
 
 ```bash
-export MUJOCO_DIR=/PATH/TO/MUJOCO/mujoco-3.x.x
+export MUJOCO_DIR=<your_path>/mujoco-3.x.x # e.g. mujoco-3.3.7 (depends on your own version)
 ```
 
 You can now compile the package using the following commands.
@@ -32,6 +32,17 @@ cd mujoco_ros2_control
 source /opt/ros/${ROS_DISTRO}/setup.bash
 colcon build
 ```
+
+### Troubleshooting
+If could not find `glfw3` package configuration, install manually.
+1. Download the [source package](https://www.glfw.org/download.html).
+2. Make and build it (*e.g.* here we use `glfw-3.4`; it can be other versions as well)
+    ```bash
+    cmake -S <your_path>/glfw-3.4 -B <your_path>/glfw-3.4/build
+    cd <your_path>/glfw-3.4/build
+    make
+    sudo make install
+    ```
 
 ## Usage
 
