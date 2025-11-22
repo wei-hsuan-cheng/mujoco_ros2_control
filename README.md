@@ -14,8 +14,9 @@ Follow these steps to install and run the project locally.
 
 Make sure you have the following software installed if you are running on the local machine:
 
-- [ROS](https://docs.ros.org/)
+- [ROS 2](https://docs.ros.org/en/humble/Installation.html)
 - [Mujoco](https://mujoco.org/)
+  - Recommended to install the pre-built libraries [here](https://github.com/google-deepmind/mujoco/releases) (following the [doc](https://mujoco.readthedocs.io/en/latest/programming/#)).
 
 ### Package Install
 
@@ -35,7 +36,7 @@ colcon build
 
 ### Troubleshooting
 If could not find `glfw3` package configuration, install manually.
-1. Download the [source package](https://www.glfw.org/download.html).
+1. Download the [GLFW source package](https://www.glfw.org/download.html).
 2. Make and build it (*e.g.* here we use `glfw-3.4`; it can be other versions as well)
     ```bash
     cmake -S <your_path>/glfw-3.4 -B <your_path>/glfw-3.4/build
