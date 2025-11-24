@@ -34,6 +34,15 @@ source /opt/ros/${ROS_DISTRO}/setup.bash
 colcon build --symlink-install --packages-select mujoco_ros2_control mujoco_ros2_control_demos
 ```
 
+Run demos:
+
+```bash
+# diff_drive demo launch
+ros2 launch mujoco_ros2_control_demos diff_drive.launch.py
+# Open another terminal and run
+ros2 run mujoco_ros2_control_demos example_diff_drive
+```
+
 ### Troubleshooting
 If could not find `glfw3` package configuration, install manually.
 1. Download the [GLFW source package](https://www.glfw.org/download.html).
