@@ -31,7 +31,7 @@ You can now compile the package using the following commands.
 ```bash
 cd mujoco_ros2_control
 source /opt/ros/${ROS_DISTRO}/setup.bash
-colcon build
+colcon build --symlink-install --packages-select mujoco_ros2_control mujoco_ros2_control_demos
 ```
 
 ### Troubleshooting
