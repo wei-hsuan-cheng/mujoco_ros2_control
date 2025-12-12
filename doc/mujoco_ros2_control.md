@@ -1,6 +1,6 @@
 # MuJoCo + ros2_control Integration (Architecture & Real‑Time Aspects)
 
-This note summarizes how the core library `mujoco_ros2_control` integrates MuJoCo with `ros2_control`, and how the example stack in this repo builds on that to stay efficient and reasonably real‑time. Focusing on:
+This note summarizes how the core library [`mujoco_ros2_control`](../mujoco_ros2_control/CMakeLists.txt) integrates MuJoCo with `ros2_control`, and how the example stack in this repo builds on that to stay efficient and reasonably real‑time. Focusing on:
 
 - How MuJoCo’s physics loop is coupled to `ros2_control`’s read–update–write cycle.
 - How the hardware abstraction is structured (URDF + `SystemInterface` plugin).
