@@ -1,9 +1,11 @@
-# MuJoCo + ros2_control Integration (Architecture & Real‑Time Aspects)
+# MuJoCo + ROS 2 Control Integration (Architecture & Real‑Time Aspects)
 
-This note summarizes how the core library [`mujoco_ros2_control`](../mujoco_ros2_control/CMakeLists.txt) integrates MuJoCo with `ros2_control`, and how the example stack in this repo builds on that to stay efficient and reasonably real‑time. Focusing on:
+This note summarizes how the core library [**`mujoco_ros2_control`**](../mujoco_ros2_control/CMakeLists.txt) integrates [**`mujoco`**](https://mujoco.readthedocs.io/en/stable/overview.html) with [**`ros2_control`**](https://github.com/ros-controls/ros2_control), and how the example stack in this repo builds on that to stay efficient and reasonably real‑time. Focusing on:
 
-- How MuJoCo’s physics loop is coupled to `ros2_control`’s read–update–write cycle.
-- How the hardware abstraction is structured (URDF + `SystemInterface` plugin).
+- How MuJoCo’s **physics loop** is coupled to [`ros2_control`](https://github.com/ros-controls/ros2_control)’s **read–update–write** cycle.
+
+- How the **hardware abstraction** is structured (URDF + `SystemInterface` plugin).
+
 - Where efficiency / decoupling comes from (threading, shared state, minimal copies).
 
 ---
@@ -13,22 +15,16 @@ This note summarizes how the core library [`mujoco_ros2_control`](../mujoco_ros2
 Key components:
 
 - **MuJoCo engine**
-  - `mjModel`, `mjData` allocated and owned by the main node  
-    [`mujoco_ros2_control_node.cpp`](../mujoco_ros2_control/src/mujoco_ros2_control_node.cpp).
-  - Simulation is advanced by repeated calls to `mj_step1` / `mj_step2`.
-- **ros2_control integration**
-  - `MujocoSystemInterface` defines an abstract MuJoCo‑aware `SystemInterface`:  
-    [`mujoco_system_interface.hpp`](../mujoco_ros2_control/include/mujoco_ros2_control/mujoco_system_interface.hpp).
-  - `MujocoSystem` implements it and exposes standard state/command interfaces:  
-    [`mujoco_system.hpp`](../mujoco_ros2_control/include/mujoco_ros2_control/mujoco_system.hpp),  
-    [`mujoco_system.cpp`](../mujoco_ros2_control/src/mujoco_system.cpp).
-  - `MujocoRos2Control` owns the `controller_manager` and schedules read–update–write calls synchronised with MuJoCo time:  
-    [`mujoco_ros2_control.hpp`](../mujoco_ros2_control/include/mujoco_ros2_control.hpp),  
-    [`mujoco_ros2_control.cpp`](../mujoco_ros2_control/src/mujoco_ros2_control.cpp).
+  - `mjModel`, `mjData` allocated and owned by the main node [`mujoco_ros2_control_node.cpp`](../mujoco_ros2_control/src/mujoco_ros2_control_node.cpp).
+  - Simulation is advanced by repeated calls to `mj_step1` / `mj_step2` in [`mujoco_ros2_control.cpp`](../mujoco_ros2_control/src/mujoco_ros2_control.cpp).
+
+- **[`ros2_control`](https://github.com/ros-controls/ros2_control) integration**
+  - `MujocoSystemInterface` defines an abstract MuJoCo‑aware `SystemInterface`: [`mujoco_system_interface.hpp`](../mujoco_ros2_control/include/mujoco_ros2_control/mujoco_system_interface.hpp).
+  - `MujocoSystem` implements it and exposes standard state/command interfaces: [`mujoco_system.hpp/cpp`](../mujoco_ros2_control/src/mujoco_system.cpp).
+  - `MujocoRos2Control` owns the `controller_manager` and schedules *read–update–write* calls synchronised with MuJoCo time: [`mujoco_ros2_control.hpp/cpp`](../mujoco_ros2_control/src/mujoco_ros2_control.cpp).
+
 - **Rendering & cameras**
-  - `MujocoRendering` and `MujocoCameras` share the same `mjModel`/`mjData`, but are purely visualization/sensor publishers:  
-    [`mujoco_rendering.cpp`](../mujoco_ros2_control/src/mujoco_rendering.cpp),  
-    [`mujoco_cameras.cpp`](../mujoco_ros2_control/src/mujoco_cameras.cpp).
+  - `MujocoRendering` and `MujocoCameras` share the same `mjModel`/`mjData`, but are purely visualization/sensor publishers: [`mujoco_rendering.cpp`](../mujoco_ros2_control/src/mujoco_rendering.cpp) and [`mujoco_cameras.cpp`](../mujoco_ros2_control/src/mujoco_cameras.cpp).
 
 In the main node:
 
@@ -51,7 +47,7 @@ The control side is thus fully encapsulated inside `MujocoRos2Control`, while th
 
 ---
 
-## Hardware Abstraction: MuJoCo as a ros2_control System
+## Hardware Abstraction: MuJoCo as a [`ros2_control`](https://github.com/ros-controls/ros2_control) System
 
 ### MuJoCo‑Aware System Interface
 
@@ -99,12 +95,12 @@ It implements:
     - IMU/FT sensors: slices of `mjData::sensordata` into `Eigen` vectors/quaternions.
 - `write()`:
   - Applies commanded torques/positions/velocities back to MuJoCo:
-    - Effort mode: clamps `effort_command` using URDF + ros2_control limits, writes into `qfrc_applied`.
+    - Effort mode: clamps `effort_command` using URDF + [`ros2_control`](https://github.com/ros-controls/ros2_control) limits, writes into `qfrc_applied`.
     - Position/velocity mode:
       - With PID: PD/PID in joint space to compute torques → `qfrc_applied`.
       - Without PID: direct write into `qpos` / `qvel` (kinematic mode).
 
-The mapping between URDF/ros2_control and MuJoCo is set up once in `init_sim()`:
+The mapping between URDF/[`ros2_control`](https://github.com/ros-controls/ros2_control) and MuJoCo is set up once in `init_sim()`:
 
 - `register_joints()`:
   - For each `hardware_info.joints[i]`, find the MuJoCo joint with `mj_name2id(mjOBJ_JOINT, joint.name)`.
@@ -122,11 +118,47 @@ The mapping between URDF/ros2_control and MuJoCo is set up once in `init_sim()`:
     - Stores `sensor_adr[id]` as the index into `mjData::sensordata`.
     - Creates `StateInterface`s for the relevant components (e.g., `force.x`, `orientation.w`).
 
+### Exposed Joint and Sensor Signals
+
+From a controller’s point of view, the following data are available via standard [`ros2_control`](https://github.com/ros-controls/ros2_control) interfaces:
+
+- **Joint encoders** (per joint)
+  - State interfaces:
+    - `position` → backed by `JointState::position` (read from `mjData::qpos[mj_pos_adr]`).
+    - `velocity` → `JointState::velocity` (from `qvel[mj_vel_adr]`).
+    - `effort` → `JointState::effort` (from `qfrc_applied[mj_vel_adr]`).
+  - Command interfaces (depending on URDF/ros2_control config):
+    - `position` / `velocity` / `effort` (and optional `_pid` variants) write into the corresponding `*_command` fields; `write()` turns those into `qpos`/`qvel` or torques.
+
+- **Force–torque sensors**
+  - Naming convention (URDF / ros2_control):
+    - Sensor name ends with `_fts` (e.g. `left_ee_fts`).
+    - MuJoCo sensors must exist with names `<prefix>_force` and `<prefix>_torque`.
+  - State interfaces exported for each F/T sensor:
+    - `force.x`, `force.y`, `force.z`.
+    - `torque.x`, `torque.y`, `torque.z`.
+  - Backed by `FTSensorData` (see [`mujoco_system.hpp`](../mujoco_ros2_control/include/mujoco_ros2_control/mujoco_system.hpp)), filled in `read()` from `mjData::sensordata[...]`.
+
+- **IMU sensors**
+  - Naming convention:
+    - Sensor name ends with `_imu` (e.g. `base_imu`).
+    - MuJoCo sensors for quaternion, gyro, and accel must exist with names `<prefix>_orientation`, `<prefix>_angular_velocity`, `<prefix>_linear_acceleration` (see [`register_sensors()`](../mujoco_ros2_control/src/mujoco_system.cpp)).
+  - State interfaces:
+    - Orientation: `orientation.x/y/z/w`.
+    - Angular velocity: `angular_velocity.x/y/z`.
+    - Linear acceleration: `linear_acceleration.x/y/z`.
+  - Backed by `IMUSensorData` and updated from `sensordata` in `read()`.
+
+All of these are exposed as in‑process state/command interfaces (not as ROS topics directly). Controllers can either:
+
+- Access them through the usual `ros2_control` handle APIs, or
+- Use separate nodes to bridge these state interfaces into ROS messages if needed.
+
 Because all ROS interfaces point directly into these small structs, and those structs are updated in place from MuJoCo, there is no heavy copying in or out of ROS messages at the control‑loop level.
 
 ---
 
-## Coupling MuJoCo and ros2_control Loops
+## Coupling MuJoCo and [`ros2_control`](https://github.com/ros-controls/ros2_control) Loops
 
 `MujocoRos2Control` is the glue between MuJoCo time and the controller manager:
 
@@ -134,11 +166,11 @@ Because all ROS interfaces point directly into these small structs, and those st
 
 ### Initialisation
 
-1. **Get URDF / ros2_control description**
+1. **Get URDF / [`ros2_control`](https://github.com/ros-controls/ros2_control) description**
    - `get_robot_description()`:
      - Tries to read the `robot_description` parameter from a temporary node.
      - If missing, subscribes to a `robot_description` topic and blocks until the message arrives.
-2. **Parse ros2_control hardware from URDF**
+2. **Parse [`ros2_control`](https://github.com/ros-controls/ros2_control) hardware from URDF**
    - Uses `hardware_interface::parse_control_resources_from_urdf(urdf_string)` to get a list of `HardwareInfo`.
    - Allocates a `hardware_interface::ResourceManager` and calls `load_urdf` on it.
 3. **Load MuJoCo hardware plugin(s)**
@@ -189,7 +221,7 @@ This yields:
 - **Single source of truth for time**: `mjData::time`, converted to `/clock`. All ROS nodes configured with `use_sim_time` will use that.
 - **Decoupled frequencies**:
   - MuJoCo can run with small internal timesteps (driven by the outer loop).
-  - `ros2_control` only runs when `sim_period >= control_period_` (e.g. 100 Hz).
+  - [`ros2_control`](https://github.com/ros-controls/ros2_control) only runs when `sim_period >= control_period_` (e.g. 100 Hz).
 - **Tight coupling where needed**:
   - `read()` always sees **fresh** MuJoCo state.
   - `write()` is always called after `update()`, before `mj_step2`, so controllers’ outputs are applied to the next physics step.
@@ -200,14 +232,14 @@ Importantly, there is no ROS messaging in this hot path—only in‑process meth
 
 ## Efficiency & Decoupling Design
 
-Compared to the custom `robot_runtime` + MuJoCo backend in `wb_humanoid_mpc`, here the efficiency/decoupling is organised explicitly around `ros2_control`:
+Compared to the custom `robot_runtime` + MuJoCo backend in `wb_humanoid_mpc`, here the efficiency/decoupling is organised explicitly around [`ros2_control`](https://github.com/ros-controls/ros2_control):
 
 ### 1. Clear Separation of Concerns
 
 - **Physics backend**: MuJoCo, driven entirely by `mj_step1/2` on `mjModel`/`mjData`.
 - **Hardware abstraction**: `MujocoSystemInterface` / `MujocoSystem`:
   - Knows how to read/write MuJoCo state, but not about controllers.
-- **Controllers**: standard `ros2_control` controllers loaded by `controller_manager`.
+- **Controllers**: standard [`ros2_control`](https://github.com/ros-controls/ros2_control) controllers loaded by `controller_manager`.
 
 This means:
 
@@ -223,7 +255,7 @@ This means:
   - Controllers themselves (topics/services).
   - Camera/image pipelines and any logging/visualization outside the control loop.
 
-This is analogous to the thread‑safe shared state pattern in `wb_humanoid_mpc`, but realised through `ros2_control`’s pointer‑based interfaces and MuJoCo’s own arrays.
+This is analogous to the thread‑safe shared state pattern in `wb_humanoid_mpc`, but realised through [`ros2_control`](https://github.com/ros-controls/ros2_control)’s pointer‑based interfaces and MuJoCo’s own arrays.
 
 ### 3. Threading Strategy
 
@@ -234,7 +266,7 @@ This is analogous to the thread‑safe shared state pattern in `wb_humanoid_mpc`
   - Spins in a separate thread via a `MultiThreadedExecutor`.
   - Reacts to parameter changes, controller lifecycle operations, etc., without blocking the physics loop.
 
-The interface between the two is a handful of `controller_manager_->read/update/write` calls and shared `ResourceManager` state, which are designed to be cheap in `ros2_control`.
+The interface between the two is a handful of `controller_manager_->read/update/write` calls and shared `ResourceManager` state, which are designed to be cheap in [`ros2_control`](https://github.com/ros-controls/ros2_control).
 
 ### 4. Flexible Control Modes with PID
 
@@ -255,21 +287,20 @@ In this repo:
 - `panda_resources/panda_mujoco` provides MuJoCo + URDF description of the Panda robot.
 - `panda_resources/panda_moveit_config` and `interactive_marker` add MoveIt / RViz integration.
 - `peg_in_hole` implements a concrete control demo that talks to the Panda via:
-  - `ros2_control` controllers powered by `MujocoSystem`.
+  - [`ros2_control`](https://github.com/ros-controls/ros2_control) controllers powered by `MujocoSystem`.
   - Standard ROS topics/services.
 
 Because the MuJoCo integration is implemented as a `SystemInterface` plugin, the examples do not need to care about MuJoCo internals:
 
-- They only see a `ros2_control`‑compatible robot with joints and sensors.
+- They only see a [`ros2_control`](https://github.com/ros-controls/ros2_control)‑compatible robot with joints and sensors.
 - Real‑time physics and timing are handled by `mujoco_ros2_control_node` + `MujocoRos2Control`.
 
 This mirrors the design from `wb_humanoid_mpc`:
 
 - There, **robot_runtime** decouples physics backend (MuJoCo vs “dummy” internal integrator) from the MPC and controllers.
-- Here, `ros2_control` plays the same role, with MuJoCo wrapped behind a `SystemInterface` and the controller manager.
+- Here, [`ros2_control`](https://github.com/ros-controls/ros2_control) plays the same role, with MuJoCo wrapped behind a `SystemInterface` and the controller manager.
 
 If you want to build your own real‑time‑ish experiments on top:
 
 - Keep heavy work (logging, camera processing, planning) off the hot `update()` path.
-- Stick to `ros2_control` controllers, so they benefit from this shared architecture automatically.
-
+- Stick to [`ros2_control`](https://github.com/ros-controls/ros2_control) controllers, so they benefit from this shared architecture automatically.
