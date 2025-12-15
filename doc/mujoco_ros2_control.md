@@ -4,7 +4,7 @@ This note summarizes how the core library [**`mujoco_ros2_control`**](../mujoco_
 
 - How MuJoCo’s **physics loop** is coupled to [`ros2_control`](https://github.com/ros-controls/ros2_control)’s **read–update–write** cycle.
 
-- How the **hardware abstraction** is structured (URDF + `SystemInterface` plugin).
+- How the **hardware abstraction** is structured (URDF + [`ros2_control SystemInterface`](https://github.com/ros-controls/ros2_control/blob/master/hardware_interface/include/hardware_interface/system_interface.hpp) plugin).
 
 - Where efficiency / decoupling comes from (threading, shared state, minimal copies).
 
@@ -19,14 +19,14 @@ Key components:
   - Simulation is advanced by repeated calls to `mj_step1` / `mj_step2` in [`mujoco_ros2_control.cpp`](../mujoco_ros2_control/src/mujoco_ros2_control.cpp).
 
 - **[`ros2_control`](https://github.com/ros-controls/ros2_control) integration**
-  - `MujocoSystemInterface` defines an abstract MuJoCo‑aware `SystemInterface`: [`mujoco_system_interface.hpp`](../mujoco_ros2_control/include/mujoco_ros2_control/mujoco_system_interface.hpp).
+  - `MujocoSystemInterface` defines an abstract MuJoCo‑aware [`ros2_control SystemInterface`](https://github.com/ros-controls/ros2_control/blob/master/hardware_interface/include/hardware_interface/system_interface.hpp): [`mujoco_system_interface.hpp`](../mujoco_ros2_control/include/mujoco_ros2_control/mujoco_system_interface.hpp).
   - `MujocoSystem` implements it and exposes standard state/command interfaces: [`mujoco_system.hpp/cpp`](../mujoco_ros2_control/src/mujoco_system.cpp).
   - `MujocoRos2Control` owns the `controller_manager` and schedules *read–update–write* calls synchronised with MuJoCo time: [`mujoco_ros2_control.hpp/cpp`](../mujoco_ros2_control/src/mujoco_ros2_control.cpp).
 
 - **Rendering & cameras**
   - `MujocoRendering` and `MujocoCameras` share the same `mjModel`/`mjData`, but are purely visualization/sensor publishers: [`mujoco_rendering.cpp`](../mujoco_ros2_control/src/mujoco_rendering.cpp) and [`mujoco_cameras.cpp`](../mujoco_ros2_control/src/mujoco_cameras.cpp).
 
-In the main node:
+In the main node [`mujoco_ros2_control_node.cpp`](../mujoco_ros2_control/src/mujoco_ros2_control_node.cpp):
 
 ```cpp
 // mujoco_ros2_control_node.cpp: main loop
@@ -43,7 +43,7 @@ while (rclcpp::ok() && !rendering->is_close_flag_raised()) {
 }
 ```
 
-The control side is thus fully encapsulated inside `MujocoRos2Control`, while the node itself only drives the outer simulation/rendering loop.
+The control side is thus fully encapsulated inside [`MujocoRos2Control`](../mujoco_ros2_control/src/mujoco_ros2_control_node.cpp), while the node itself only drives the outer simulation/rendering loop.
 
 ---
 
@@ -65,7 +65,7 @@ public:
 };
 ```
 
-This extends the standard `SystemInterface` with an `init_sim(...)` hook that:
+This extends the standard [`ros2_control SystemInterface`](https://github.com/ros-controls/ros2_control/blob/master/hardware_interface/include/hardware_interface/system_interface.hpp) with an `init_sim(...)` hook that:
 
 - Provides direct access to **MuJoCo model/data** (`mjModel*`, `mjData*`).
 - Passes the parsed **URDF model** and `HardwareInfo` (joints, sensors) to map ROS control interfaces onto MuJoCo DOFs/sensors.
@@ -290,7 +290,7 @@ In this repo:
   - [`ros2_control`](https://github.com/ros-controls/ros2_control) controllers powered by `MujocoSystem`.
   - Standard ROS topics/services.
 
-Because the MuJoCo integration is implemented as a `SystemInterface` plugin, the examples do not need to care about MuJoCo internals:
+Because the MuJoCo integration is implemented as a [`ros2_control SystemInterface`](https://github.com/ros-controls/ros2_control/blob/master/hardware_interface/include/hardware_interface/system_interface.hpp) plugin, the examples do not need to care about MuJoCo internals:
 
 - They only see a [`ros2_control`](https://github.com/ros-controls/ros2_control)‑compatible robot with joints and sensors.
 - Real‑time physics and timing are handled by `mujoco_ros2_control_node` + `MujocoRos2Control`.
@@ -298,7 +298,7 @@ Because the MuJoCo integration is implemented as a `SystemInterface` plugin, the
 This mirrors the design from `wb_humanoid_mpc`:
 
 - There, **robot_runtime** decouples physics backend (MuJoCo vs “dummy” internal integrator) from the MPC and controllers.
-- Here, [`ros2_control`](https://github.com/ros-controls/ros2_control) plays the same role, with MuJoCo wrapped behind a `SystemInterface` and the controller manager.
+- Here, [`ros2_control`](https://github.com/ros-controls/ros2_control) plays the same role, with MuJoCo wrapped behind a [`ros2_control SystemInterface`](https://github.com/ros-controls/ros2_control/blob/master/hardware_interface/include/hardware_interface/system_interface.hpp) and the controller manager.
 
 If you want to build your own real‑time‑ish experiments on top:
 

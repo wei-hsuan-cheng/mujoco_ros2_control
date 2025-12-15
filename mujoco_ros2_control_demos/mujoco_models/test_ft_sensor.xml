@@ -16,11 +16,13 @@
                 <site name="motor_fts" pos="0 0 0"/>
             </body>
         </body>
+
         <body name="weight" pos="0 0 10" euler="0 0 0">
                 <freejoint name="world_to_weight"/>
                 <geom type="box" size="0.25 0.25 0.1" rgba=".8 0 0 1" />
                 <inertial pos="0 0 0" mass="10" diaginertia="1.0 1.0 1.0" />
-            </body>
+        </body>
+        
 	</worldbody>
     <sensor>
         <force name="motor_force" site="motor_fts"/>
