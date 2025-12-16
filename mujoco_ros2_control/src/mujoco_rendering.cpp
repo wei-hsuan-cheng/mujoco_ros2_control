@@ -64,6 +64,12 @@ void MujocoRendering::init(mjModel *mujoco_model, mjData *mujoco_data)
   mjv_defaultScene(&mjv_scn_);
   mjr_defaultContext(&mjr_con_);
 
+  // Show body frames (including world and end-effector frames)
+  mjv_opt_.frame = mjFRAME_NONE; // default: mjFRAME_NONE or mjFRAME_BODY
+  // Make frame axes smaller than MuJoCo defaults
+  mj_model_->vis.scale.framelength *= 0.5f;
+  mj_model_->vis.scale.framewidth *= 0.3f;
+
   mjv_cam_.type = mjCAMERA_FREE;
   mjv_cam_.distance = 8.;
 
@@ -147,6 +153,12 @@ void MujocoRendering::keyboard_callback_impl(
   {
     mj_resetData(mj_model_, mj_data_);
     mj_forward(mj_model_, mj_data_);
+  }
+
+  // 'F' key: toggle body frames on/off
+  if (act == GLFW_PRESS && key == GLFW_KEY_F)
+  {
+    mjv_opt_.frame = (mjv_opt_.frame == mjFRAME_BODY) ? mjFRAME_NONE : mjFRAME_BODY;
   }
 }
 
