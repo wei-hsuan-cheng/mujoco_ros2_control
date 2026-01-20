@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <cstdio>
 #include "mujoco_ros2_control/mujoco_rendering.hpp"
-
 #include "sensor_msgs/image_encodings.hpp"
 
 namespace mujoco_ros2_control
@@ -46,6 +46,26 @@ MujocoRendering::MujocoRendering()
       lasty_(0.0)
 {
 }
+
+void MujocoRendering::set_camera_by_id(int cam_id)
+{
+  current_cam_id_ = cam_id;
+
+  if (cam_id < 0) {
+    mjv_cam_.type = mjCAMERA_FREE;
+    return;
+  }
+
+  mjv_cam_.type = mjCAMERA_FIXED;
+  mjv_cam_.fixedcamid = cam_id;
+
+  // Optional: print which camera you switched to
+  const char* nm = mj_id2name(mj_model_, mjOBJ_CAMERA, cam_id);
+  if (nm) {
+    std::printf("[mujoco_rendering] switched to camera: %s (id=%d)\n", nm, cam_id);
+  }
+}
+
 
 void MujocoRendering::init(mjModel *mujoco_model, mjData *mujoco_data)
 {
@@ -160,6 +180,16 @@ void MujocoRendering::keyboard_callback_impl(
   {
     mjv_opt_.frame = (mjv_opt_.frame == mjFRAME_BODY) ? mjFRAME_NONE : mjFRAME_BODY;
   }
+
+  // 'C' key: Set camera (cyclic)
+  if (act == GLFW_PRESS && key == GLFW_KEY_C) {
+    // cycle: free(-1) -> 0 -> 1 -> ... -> ncam-1 -> free(-1)
+    if (mj_model_->ncam == 0) return;
+    int next = current_cam_id_ + 1;
+    if (next >= mj_model_->ncam) next = -1;
+    set_camera_by_id(next);
+  }
+
 }
 
 void MujocoRendering::mouse_button_callback_impl(

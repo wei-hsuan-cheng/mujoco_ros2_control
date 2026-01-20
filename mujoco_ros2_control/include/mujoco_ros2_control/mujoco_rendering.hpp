@@ -57,6 +57,8 @@ private:
   void mouse_move_callback_impl(GLFWwindow *window, double xpos, double ypos);
   void scroll_callback_impl(GLFWwindow *window, double xoffset, double yoffset);
 
+  void set_camera_by_id(int cam_id);
+
   static MujocoRendering *instance_;
 
   mjModel *mj_model_;
@@ -65,6 +67,7 @@ private:
   // Window and primary camera for the simulation's viewer
   GLFWwindow *window_;
   mjvCamera mjv_cam_;
+  int current_cam_id_{-1};  // -1 = free, >=0 = mjModel camera id
 
   // Options for the rendering context and scene, all of these are hard coded to defaults.
   mjvOption mjv_opt_;
