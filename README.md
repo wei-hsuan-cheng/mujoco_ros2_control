@@ -44,15 +44,17 @@ ros2 run mujoco_ros2_control_demos example_diff_drive
 ```
 
 ### Troubleshooting
-If could not find `glfw3` package configuration, install manually.
-1. Download the [GLFW source package](https://www.glfw.org/download.html).
-2. Make and build it (*e.g.* here we use `glfw-3.4`; it can be other versions as well)
-    ```bash
-    cmake -S <your_path>/glfw-3.4 -B <your_path>/glfw-3.4/build
-    cd <your_path>/glfw-3.4/build
-    make
-    sudo make install
-    ```
+- If could not find `glfw3` package configuration, install manually.
+  1. Download the [GLFW source package](https://www.glfw.org/download.html).
+  2. Make and build it (*e.g.* here we use `glfw-3.4`; it can be other versions as well)
+      ```bash
+      cmake -S <your_path>/glfw-3.4 -B <your_path>/glfw-3.4/build
+      cd <your_path>/glfw-3.4/build
+      make
+      sudo make install
+      ```
+  
+- **DO NOT** use `mujoco_vendor`. It will conflit with the way we configure the environment.
 
 ## Usage
 
