@@ -264,14 +264,24 @@ void MujocoRos2Control::init_ground_truth()
   // ---------------- PROTECT: if not specified, fallback ----------------
   if (requested_body_frames.empty())
   {
-    // Try a sensible default for your robot
-    requested_body_frames = std::vector<std::string>{"mobile_base_link"};
-
     RCLCPP_WARN_STREAM(
       logger_,
       "Ground truth enabled but parameter 'gt_body_frames' is empty. "
-      "Falling back to default: [mobile_base_link]. "
-      "If you want more frames, set 'gt_body_frames' in your YAML.");
+      "Disabling ground truth publishing. "
+      "Set 'gt_body_frames' to enable GT TF/Odom.");
+
+    gt_enabled_ = false;            // 讓 update() 裡面不會再進 publish_ground_truth()
+    gt_publish_tf_ = false;
+
+    gt_tf_broadcaster_.reset();
+    gt_odom_pub_.reset();
+
+    gt_body_frames_.clear();
+    gt_body_ids_.clear();
+    gt_odom_child_frame_.clear();
+    gt_odom_body_id_ = -1;
+
+    return;
   }
 
   // Period
