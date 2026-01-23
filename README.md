@@ -54,7 +54,13 @@ ros2 run mujoco_ros2_control_demos example_diff_drive
       sudo make install
       ```
   
-- **DO NOT** use `mujoco_vendor`. It will conflit with the way we configure the environment.
+- **DO NOT** use `mujoco_vendor`. It will conflit with the way we configure the environment. Run this to make sure the mujoco env is correct
+  ```bash
+  # Terminal command
+  ldd install/mujoco_ros2_control/lib/mujoco_ros2_control/mujoco_ros2_control | grep mujoco
+  # It should returns this (e.g., for mujoco-3.3.7)
+  libmujoco.so.3.3.7 => <your_mujoco_path>/mujoco-3.3.7/lib/libmujoco.so.3.3.7 (0x0000709b0f376000)
+  ```
 
 ## Usage
 

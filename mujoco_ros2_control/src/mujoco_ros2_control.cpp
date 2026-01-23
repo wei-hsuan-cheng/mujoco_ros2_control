@@ -22,6 +22,8 @@
 #include "hardware_interface/resource_manager.hpp"
 #include "hardware_interface/system_interface.hpp"
 
+#include <cmath>
+
 #include "mujoco_ros2_control/mujoco_ros2_control.hpp"
 
 namespace mujoco_ros2_control
@@ -185,6 +187,8 @@ void MujocoRos2Control::init()
     }
   };
   cm_thread_ = std::thread(spin);
+
+  init_ground_truth();
 }
 
 void MujocoRos2Control::update()
@@ -198,6 +202,10 @@ void MujocoRos2Control::update()
   rclcpp::Duration sim_period = sim_time_ros - last_update_sim_time_ros_;
 
   publish_sim_time(sim_time_ros);
+  if (gt_enabled_)
+  {
+    publish_ground_truth(sim_time_ros);
+  }
 
   mj_step1(mj_model_, mj_data_);
 
@@ -220,6 +228,209 @@ void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
   rosgraph_msgs::msg::Clock sim_time_msg;
   sim_time_msg.clock = sim_time;
   clock_publisher_->publish(sim_time_msg);
+}
+
+void MujocoRos2Control::init_ground_truth()
+{
+  if (!node_->has_parameter("gt_enabled"))
+    node_->declare_parameter<bool>("gt_enabled", false);
+  gt_enabled_ = node_->get_parameter("gt_enabled").as_bool();
+  if (!gt_enabled_) return;
+
+  if (!node_->has_parameter("gt_publish_tf"))
+    node_->declare_parameter<bool>("gt_publish_tf", false);
+  if (!node_->has_parameter("gt_pub_hz"))
+    node_->declare_parameter<double>("gt_pub_hz", 120.0);
+  if (!node_->has_parameter("gt_odom_topic"))
+    node_->declare_parameter<std::string>("gt_odom_topic", "/mujoco/ground_truth/odom");
+  if (!node_->has_parameter("gt_root_frame"))
+    node_->declare_parameter<std::string>("gt_root_frame", "world");
+  if (!node_->has_parameter("gt_frame_prefix"))
+    node_->declare_parameter<std::string>("gt_frame_prefix", "");
+  if (!node_->has_parameter("gt_frame_suffix"))
+    node_->declare_parameter<std::string>("gt_frame_suffix", "");
+  if (!node_->has_parameter("gt_body_frames"))
+    node_->declare_parameter<std::vector<std::string>>("gt_body_frames", std::vector<std::string>{});
+
+  gt_publish_tf_   = node_->get_parameter("gt_publish_tf").as_bool();
+  gt_pub_hz_       = node_->get_parameter("gt_pub_hz").as_double();
+  gt_odom_topic_   = node_->get_parameter("gt_odom_topic").as_string();
+  gt_root_frame_   = node_->get_parameter("gt_root_frame").as_string();
+  gt_frame_prefix_ = node_->get_parameter("gt_frame_prefix").as_string();
+  gt_frame_suffix_ = node_->get_parameter("gt_frame_suffix").as_string();
+
+  auto requested_body_frames = node_->get_parameter("gt_body_frames").as_string_array();
+
+  // ---------------- PROTECT: if not specified, fallback ----------------
+  if (requested_body_frames.empty())
+  {
+    // Try a sensible default for your robot
+    requested_body_frames = std::vector<std::string>{"mobile_base_link"};
+
+    RCLCPP_WARN_STREAM(
+      logger_,
+      "Ground truth enabled but parameter 'gt_body_frames' is empty. "
+      "Falling back to default: [mobile_base_link]. "
+      "If you want more frames, set 'gt_body_frames' in your YAML.");
+  }
+
+  // Period
+  if (gt_pub_hz_ > 0.0 && std::isfinite(gt_pub_hz_))
+    gt_period_ = rclcpp::Duration::from_seconds(1.0 / gt_pub_hz_);
+  else
+    gt_period_ = rclcpp::Duration(0, 0);
+
+  // TF broadcaster / odom pub
+  if (gt_publish_tf_)
+    gt_tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
+
+  if (!gt_odom_topic_.empty())
+    gt_odom_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>(gt_odom_topic_, rclcpp::QoS(10));
+
+  // Resolve body IDs
+  gt_body_ids_.clear();
+  gt_body_frames_.clear();
+  gt_body_ids_.reserve(requested_body_frames.size());
+  gt_body_frames_.reserve(requested_body_frames.size());
+
+  for (const auto &frame_name : requested_body_frames)
+  {
+    const int body_id = mj_name2id(mj_model_, mjOBJ_BODY, frame_name.c_str());
+    if (body_id < 0)
+    {
+      RCLCPP_WARN_STREAM(
+        logger_, "Ground truth: body '" << frame_name << "' not found in MuJoCo model; skipping.");
+      continue;
+    }
+    gt_body_frames_.push_back(frame_name);
+    gt_body_ids_.push_back(body_id);
+  }
+
+  // ------------- PROTECT: if still none valid, disable GT safely -------------
+  if (gt_body_frames_.empty())
+  {
+    RCLCPP_ERROR_STREAM(
+      logger_,
+      "Ground truth enabled but none of the requested bodies exist in the MuJoCo model. "
+      "Disabling ground truth publishing.");
+    gt_enabled_ = false;
+    gt_tf_broadcaster_.reset();
+    gt_odom_pub_.reset();
+    return;
+  }
+
+  // Choose odom body: prefer mobile_base_link, else first valid
+  gt_odom_child_frame_.clear();
+  gt_odom_body_id_ = -1;
+
+  for (size_t i = 0; i < gt_body_frames_.size(); ++i)
+  {
+    if (gt_body_frames_[i] == "mobile_base_link")
+    {
+      gt_odom_child_frame_ = gt_body_frames_[i];
+      gt_odom_body_id_ = gt_body_ids_[i];
+      break;
+    }
+  }
+  if (gt_odom_body_id_ < 0)
+  {
+    gt_odom_child_frame_ = gt_body_frames_.front();
+    gt_odom_body_id_ = gt_body_ids_.front();
+    RCLCPP_WARN_STREAM(
+      logger_,
+      "Ground truth: 'mobile_base_link' not in gt_body_frames, using first valid body '"
+        << gt_odom_child_frame_ << "' for odom.");
+  }
+
+  RCLCPP_INFO_STREAM(
+    logger_,
+    "Ground truth enabled (publish_tf=" << (gt_publish_tf_ ? "true" : "false")
+    << ", hz=" << gt_pub_hz_
+    << ", parent_frame=" << gt_root_frame_
+    << ", odom_topic=" << gt_odom_topic_
+    << ", odom_child_frame=" << gt_odom_child_frame_
+    << ", prefix=" << gt_frame_prefix_
+    << ", suffix=" << gt_frame_suffix_
+    << ", bodies=" << gt_body_frames_.size() << ")");
+}
+
+void MujocoRos2Control::publish_ground_truth(const rclcpp::Time &stamp)
+{
+  if (!gt_enabled_)
+  {
+    return;
+  }
+
+  if (gt_period_ > rclcpp::Duration(0, 0) && (stamp - last_gt_pub_time_) < gt_period_)
+  {
+    return;
+  }
+  last_gt_pub_time_ = stamp;
+
+  if (gt_publish_tf_ && gt_tf_broadcaster_)
+  {
+    std::vector<geometry_msgs::msg::TransformStamped> transforms;
+    transforms.reserve(gt_body_ids_.size());
+
+    for (size_t i = 0; i < gt_body_ids_.size(); ++i)
+    {
+      const int body_id = gt_body_ids_[i];
+      const auto &body_name = gt_body_frames_[i];
+      const std::string child_frame = gt_frame_prefix_ + body_name + gt_frame_suffix_;
+
+      geometry_msgs::msg::TransformStamped tf_msg;
+      tf_msg.header.stamp = stamp;
+      tf_msg.header.frame_id = gt_root_frame_;
+      tf_msg.child_frame_id = child_frame;
+
+      tf_msg.transform.translation.x = mj_data_->xpos[3 * body_id + 0];
+      tf_msg.transform.translation.y = mj_data_->xpos[3 * body_id + 1];
+      tf_msg.transform.translation.z = mj_data_->xpos[3 * body_id + 2];
+
+      // MuJoCo uses [w, x, y, z]; ROS uses [x, y, z, w]
+      tf_msg.transform.rotation.w = mj_data_->xquat[4 * body_id + 0];
+      tf_msg.transform.rotation.x = mj_data_->xquat[4 * body_id + 1];
+      tf_msg.transform.rotation.y = mj_data_->xquat[4 * body_id + 2];
+      tf_msg.transform.rotation.z = mj_data_->xquat[4 * body_id + 3];
+
+      transforms.push_back(std::move(tf_msg));
+    }
+
+    gt_tf_broadcaster_->sendTransform(transforms);
+  }
+
+  if (gt_odom_pub_ && gt_odom_body_id_ >= 0 && !gt_odom_child_frame_.empty())
+  {
+    nav_msgs::msg::Odometry odom;
+    odom.header.stamp = stamp;
+    odom.header.frame_id = gt_root_frame_;
+    odom.child_frame_id = gt_frame_prefix_ + gt_odom_child_frame_ + gt_frame_suffix_;
+
+    const int body_id = gt_odom_body_id_;
+
+    odom.pose.pose.position.x = mj_data_->xpos[3 * body_id + 0];
+    odom.pose.pose.position.y = mj_data_->xpos[3 * body_id + 1];
+    odom.pose.pose.position.z = mj_data_->xpos[3 * body_id + 2];
+
+    odom.pose.pose.orientation.w = mj_data_->xquat[4 * body_id + 0];
+    odom.pose.pose.orientation.x = mj_data_->xquat[4 * body_id + 1];
+    odom.pose.pose.orientation.y = mj_data_->xquat[4 * body_id + 2];
+    odom.pose.pose.orientation.z = mj_data_->xquat[4 * body_id + 3];
+
+    mjtNum vel6[6] = {0};
+    // Returns 6D velocity as (angular, linear) about object center.
+    // flg_local=1 expresses vectors in the body's local frame, matching Odometry child frame.
+    mj_objectVelocity(mj_model_, mj_data_, mjOBJ_BODY, body_id, vel6, /*flg_local=*/1);
+
+    odom.twist.twist.angular.x = vel6[0];
+    odom.twist.twist.angular.y = vel6[1];
+    odom.twist.twist.angular.z = vel6[2];
+    odom.twist.twist.linear.x = vel6[3];
+    odom.twist.twist.linear.y = vel6[4];
+    odom.twist.twist.linear.z = vel6[5];
+
+    gt_odom_pub_->publish(odom);
+  }
 }
 
 }  // namespace mujoco_ros2_control

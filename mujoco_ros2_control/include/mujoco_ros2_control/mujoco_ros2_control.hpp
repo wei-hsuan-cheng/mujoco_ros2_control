@@ -23,11 +23,15 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "controller_manager/controller_manager.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rosgraph_msgs/msg/clock.hpp"
+#include "tf2_ros/transform_broadcaster.h"
 
 #include "mujoco/mujoco.h"
 
@@ -45,6 +49,8 @@ public:
 
 private:
   void publish_sim_time(rclcpp::Time sim_time);
+  void init_ground_truth();
+  void publish_ground_truth(const rclcpp::Time &stamp);
   std::string get_robot_description();
   rclcpp::Node::SharedPtr node_;
   mjModel *mj_model_;
@@ -61,6 +67,22 @@ private:
 
   rclcpp::Time last_update_sim_time_ros_;
   rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_publisher_;
+
+  bool gt_enabled_{false};
+  bool gt_publish_tf_{false};
+  double gt_pub_hz_{120.0};
+  rclcpp::Duration gt_period_{0, 0};
+  rclcpp::Time last_gt_pub_time_{0, 0, RCL_ROS_TIME};
+  std::string gt_odom_topic_;
+  std::string gt_root_frame_;
+  std::string gt_frame_prefix_;
+  std::string gt_frame_suffix_;
+  std::vector<std::string> gt_body_frames_;
+  std::vector<int> gt_body_ids_;
+  int gt_odom_body_id_{-1};
+  std::string gt_odom_child_frame_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr gt_odom_pub_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> gt_tf_broadcaster_;
 };
 }  // namespace mujoco_ros2_control
 
