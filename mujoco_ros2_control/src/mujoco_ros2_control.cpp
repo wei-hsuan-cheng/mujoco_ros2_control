@@ -309,7 +309,7 @@ void MujocoRos2Control::init_ground_truth()
   // ------------- PROTECT: if still none valid, disable GT safely -------------
   if (gt_body_frames_.empty())
   {
-    RCLCPP_ERROR_STREAM(
+    RCLCPP_WARN_STREAM(
       logger_,
       "Ground truth enabled but none of the requested bodies exist in the MuJoCo model. "
       "Disabling ground truth publishing.");
