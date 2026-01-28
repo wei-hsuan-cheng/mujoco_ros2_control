@@ -1,0 +1,22 @@
+mujoco_ros2_control:
+  ros__parameters:
+    # MuJoCo viewer camera (used by mujoco_ros2_control renderer)
+    # - mode: "free" (draggable) or "fixed" (locks to a named camera defined in XML)
+    # - You can also set: 'viewer_camera.name' (string) or 'viewer_camera.id' (int) when mode="fixed"
+    'viewer_camera.mode': 'free'
+    'viewer_camera.azimuth': -60.0
+    'viewer_camera.elevation': -30.0
+    'viewer_camera.distance': 3.0
+    'viewer_camera.lookat': [0.0, 0.5, 1.1]
+
+    # Ground truth poses
+    gt_enabled: true
+    gt_publish_tf: true
+    gt_pub_hz: 120.0
+    gt_odom_topic: /mujoco/ground_truth/odom
+    gt_root_frame: world
+    gt_frame_suffix: _gt
+
+    # Must have at least one element if gt_enabled is true
+    gt_body_frames:
+      - base_link

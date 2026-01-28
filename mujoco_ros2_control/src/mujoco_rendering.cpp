@@ -90,8 +90,15 @@ void MujocoRendering::init(mjModel *mujoco_model, mjData *mujoco_data)
   mj_model_->vis.scale.framelength *= 0.5f;
   mj_model_->vis.scale.framewidth *= 0.3f;
 
+  // Initialize viewer camera from model defaults (XML <visual><global/> and <statistic/>)
+  // This keeps the camera draggable (free camera), but with a deterministic start pose.
   mjv_cam_.type = mjCAMERA_FREE;
-  mjv_cam_.distance = 8.;
+  mjv_cam_.azimuth = mj_model_->vis.global.azimuth;
+  mjv_cam_.elevation = mj_model_->vis.global.elevation;
+  mjv_cam_.lookat[0] = mj_model_->stat.center[0];
+  mjv_cam_.lookat[1] = mj_model_->stat.center[1];
+  mjv_cam_.lookat[2] = mj_model_->stat.center[2];
+  mjv_cam_.distance = (mj_model_->stat.extent > 1e-9) ? (2.0 * mj_model_->stat.extent) : 5.0;
 
   // create scene and context
   mjv_makeScene(mj_model_, &mjv_scn_, 2000);
@@ -106,6 +113,66 @@ void MujocoRendering::init(mjModel *mujoco_model, mjData *mujoco_data)
   // This might cause tearing, but having RViz and the renderer both open can
   // wreak havoc on the rendering process.
   glfwSwapInterval(0);
+}
+
+void MujocoRendering::configure_camera_from_ros_params(const rclcpp::Node::SharedPtr &node)
+{
+  if (!node || !mj_model_) return;
+
+  // Declare parameters with defaults based on the loaded model.
+  // If launch overrides them, those overridden values will be visible via get_parameter().
+  if (!node->has_parameter("viewer_camera.mode")) {
+    node->declare_parameter<std::string>("viewer_camera.mode", "free");  // free | fixed
+  }
+  if (!node->has_parameter("viewer_camera.id")) {
+    node->declare_parameter<int>("viewer_camera.id", -1);  // fixed camera id
+  }
+  if (!node->has_parameter("viewer_camera.name")) {
+    node->declare_parameter<std::string>("viewer_camera.name", "");  // fixed camera name
+  }
+  if (!node->has_parameter("viewer_camera.azimuth")) {
+    node->declare_parameter<double>("viewer_camera.azimuth", static_cast<double>(mj_model_->vis.global.azimuth));
+  }
+  if (!node->has_parameter("viewer_camera.elevation")) {
+    node->declare_parameter<double>("viewer_camera.elevation", static_cast<double>(mj_model_->vis.global.elevation));
+  }
+  if (!node->has_parameter("viewer_camera.distance")) {
+    const double dflt = (mj_model_->stat.extent > 1e-9) ? (2.0 * mj_model_->stat.extent) : 5.0;
+    node->declare_parameter<double>("viewer_camera.distance", dflt);
+  }
+  if (!node->has_parameter("viewer_camera.lookat")) {
+    node->declare_parameter<std::vector<double>>(
+      "viewer_camera.lookat",
+      {static_cast<double>(mj_model_->stat.center[0]),
+       static_cast<double>(mj_model_->stat.center[1]),
+       static_cast<double>(mj_model_->stat.center[2])});
+  }
+
+  const auto mode = node->get_parameter("viewer_camera.mode").as_string();
+  const auto cam_name = node->get_parameter("viewer_camera.name").as_string();
+  int cam_id = node->get_parameter("viewer_camera.id").as_int();
+
+  if (mode == "fixed") {
+    if (!cam_name.empty()) {
+      const int id = mj_name2id(mj_model_, mjOBJ_CAMERA, cam_name.c_str());
+      if (id >= 0) cam_id = id;
+    }
+    set_camera_by_id(cam_id);
+    return;
+  }
+
+  // Free camera: draggable. Apply initial pose.
+  mjv_cam_.type = mjCAMERA_FREE;
+  mjv_cam_.azimuth = node->get_parameter("viewer_camera.azimuth").as_double();
+  mjv_cam_.elevation = node->get_parameter("viewer_camera.elevation").as_double();
+  mjv_cam_.distance = node->get_parameter("viewer_camera.distance").as_double();
+
+  const auto lookat = node->get_parameter("viewer_camera.lookat").as_double_array();
+  if (lookat.size() == 3) {
+    mjv_cam_.lookat[0] = lookat[0];
+    mjv_cam_.lookat[1] = lookat[1];
+    mjv_cam_.lookat[2] = lookat[2];
+  }
 }
 
 bool MujocoRendering::is_close_flag_raised() { return glfwWindowShouldClose(window_); }

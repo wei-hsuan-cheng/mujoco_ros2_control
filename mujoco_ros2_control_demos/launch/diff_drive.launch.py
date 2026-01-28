@@ -2,20 +2,21 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 
-
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess, RegisterEventHandler
 from launch.event_handlers import OnProcessExit, OnProcessStart
 
 from launch_ros.actions import Node
-
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch_ros.parameter_descriptions import ParameterFile
+from launch_ros.substitutions import FindPackageShare
 import xacro
 
 
 def generate_launch_description():
     mujoco_ros2_control_demos_path = os.path.join(
         get_package_share_directory('mujoco_ros2_control_demos'))
-
+    
     xacro_file = os.path.join(mujoco_ros2_control_demos_path,
                               'urdf',
                               'test_diff_drive.xacro.urdf')
@@ -25,6 +26,7 @@ def generate_launch_description():
     robot_description = {'robot_description': doc.toxml()}
 
     controller_config_file = os.path.join(mujoco_ros2_control_demos_path, 'config', 'diff_drive_controller.yaml')
+    mujoco_cfg = os.path.join(mujoco_ros2_control_demos_path, 'config', 'mujoco_params.yaml')
 
     node_mujoco_ros2_control = Node(
         package='mujoco_ros2_control',
@@ -33,6 +35,7 @@ def generate_launch_description():
         parameters=[
             robot_description,
             controller_config_file,
+            ParameterFile(mujoco_cfg, allow_substs=True),
             {'mujoco_model_path':os.path.join(mujoco_ros2_control_demos_path, 'mujoco_models', 'test_diff_drive.xml')}
         ]
     )

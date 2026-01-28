@@ -75,6 +75,7 @@ int main(int argc, const char **argv)
   }
   auto rendering = mujoco_ros2_control::MujocoRendering::get_instance();
   rendering->init(mujoco_model, mujoco_data);
+  rendering->configure_camera_from_ros_params(node);
   RCLCPP_INFO_STREAM(node->get_logger(), "Mujoco rendering has been successfully initialized !");
 
   auto cameras = std::make_unique<mujoco_ros2_control::MujocoCameras>(node);

@@ -41,6 +41,7 @@ public:
 
   static MujocoRendering *get_instance();
   void init(mjModel *mujoco_model, mjData *mujoco_data);
+  void configure_camera_from_ros_params(const rclcpp::Node::SharedPtr &node);
   bool is_close_flag_raised();
   void update();
   void close();
