@@ -22,6 +22,39 @@
 
 namespace mujoco_ros2_control
 {
+namespace
+{
+constexpr char PARAM_MUJOCO_FORCE_SENSOR_NAME[] = "mujoco_force_sensor_name";
+constexpr char PARAM_MUJOCO_TORQUE_SENSOR_NAME[] = "mujoco_torque_sensor_name";
+constexpr char PARAM_MUJOCO_QUAT_SENSOR_NAME[] = "mujoco_quat_sensor_name";
+constexpr char PARAM_MUJOCO_GYRO_SENSOR_NAME[] = "mujoco_gyro_sensor_name";
+constexpr char PARAM_MUJOCO_ACCEL_SENSOR_NAME[] = "mujoco_accel_sensor_name";
+
+std::string strip_suffix_after_last_underscore(const std::string &name)
+{
+  const auto last_underscore = name.rfind('_');
+  if (last_underscore == std::string::npos)
+  {
+    return name;
+  }
+  return name.substr(0, last_underscore);
+}
+
+bool has_sensor_param(
+  const hardware_interface::ComponentInfo &sensor, const std::string &param_name)
+{
+  return sensor.parameters.find(param_name) != sensor.parameters.end();
+}
+
+std::string get_sensor_param_or_default(
+  const hardware_interface::ComponentInfo &sensor, const std::string &param_name,
+  const std::string &default_value)
+{
+  const auto it = sensor.parameters.find(param_name);
+  return it != sensor.parameters.end() ? it->second : default_value;
+}
+}  // namespace
+
 MujocoSystem::MujocoSystem() : logger_(rclcpp::get_logger("")) {}
 
 std::vector<hardware_interface::StateInterface> MujocoSystem::export_state_interfaces()
@@ -338,20 +371,26 @@ void MujocoSystem::register_joints(
 void MujocoSystem::register_sensors(
   const urdf::Model & /* urdf_model */, const hardware_interface::HardwareInfo &hardware_info)
 {
-  // Assuming force/torque sensor end with "_fts" in the name,
-  // and IMU sensor end with "_imu" in the name
   for (size_t sensor_index = 0; sensor_index < hardware_info.sensors.size(); sensor_index++)
   {
     auto sensor = hardware_info.sensors.at(sensor_index);
-    std::string sensor_name = sensor.name;
-    sensor_name = sensor_name.substr(0, sensor_name.rfind('_'));
+    const std::string sensor_base_name = strip_suffix_after_last_underscore(sensor.name);
+    const bool has_explicit_ft_mapping =
+      has_sensor_param(sensor, PARAM_MUJOCO_FORCE_SENSOR_NAME) &&
+      has_sensor_param(sensor, PARAM_MUJOCO_TORQUE_SENSOR_NAME);
+    const bool has_explicit_imu_mapping =
+      has_sensor_param(sensor, PARAM_MUJOCO_QUAT_SENSOR_NAME) &&
+      has_sensor_param(sensor, PARAM_MUJOCO_GYRO_SENSOR_NAME) &&
+      has_sensor_param(sensor, PARAM_MUJOCO_ACCEL_SENSOR_NAME);
 
-    if (sensor.name.find("_fts") != std::string::npos)
+    if (has_explicit_ft_mapping || sensor.name.find("_fts") != std::string::npos)
     {
       FTSensorData sensor_data;
-      sensor_data.name = sensor_name;
-      sensor_data.force.name = sensor_name + "_force";
-      sensor_data.torque.name = sensor_name + "_torque";
+      sensor_data.name = sensor.name;
+      sensor_data.force.name = get_sensor_param_or_default(
+        sensor, PARAM_MUJOCO_FORCE_SENSOR_NAME, sensor_base_name + "_force");
+      sensor_data.torque.name = get_sensor_param_or_default(
+        sensor, PARAM_MUJOCO_TORQUE_SENSOR_NAME, sensor_base_name + "_torque");
 
       int force_sensor_id = mj_name2id(mj_model_, mjOBJ_SENSOR, sensor_data.force.name.c_str());
       int torque_sensor_id = mj_name2id(mj_model_, mjOBJ_SENSOR, sensor_data.torque.name.c_str());
@@ -405,13 +444,16 @@ void MujocoSystem::register_sensors(
       }
     }
 
-    else if (sensor.name.find("_imu") != std::string::npos)
+    else if (has_explicit_imu_mapping || sensor.name.find("_imu") != std::string::npos)
     {
       IMUSensorData sensor_data;
-      sensor_data.name = sensor_name;
-      sensor_data.orientation.name = sensor_name + "_quat";
-      sensor_data.angular_velocity.name = sensor_name + "_gyro";
-      sensor_data.linear_acceleration.name = sensor_name + "_accel";
+      sensor_data.name = sensor.name;
+      sensor_data.orientation.name = get_sensor_param_or_default(
+        sensor, PARAM_MUJOCO_QUAT_SENSOR_NAME, sensor_base_name + "_quat");
+      sensor_data.angular_velocity.name = get_sensor_param_or_default(
+        sensor, PARAM_MUJOCO_GYRO_SENSOR_NAME, sensor_base_name + "_gyro");
+      sensor_data.linear_acceleration.name = get_sensor_param_or_default(
+        sensor, PARAM_MUJOCO_ACCEL_SENSOR_NAME, sensor_base_name + "_accel");
 
       int quat_id = mj_name2id(mj_model_, mjOBJ_SENSOR, sensor_data.orientation.name.c_str());
       int gyro_id = mj_name2id(mj_model_, mjOBJ_SENSOR, sensor_data.angular_velocity.name.c_str());
