@@ -34,7 +34,8 @@ source /opt/ros/${ROS_DISTRO}/setup.bash
 colcon build --symlink-install \
   --packages-select mujoco_ros2_control mujoco_ros2_control_demos \
   --cmake-force-configure \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release
+  --cmake-args -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release && \
+  . install/setup.bash
 ```
 
 Run demos:
