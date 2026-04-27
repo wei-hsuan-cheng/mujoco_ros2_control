@@ -31,15 +31,15 @@ You can now compile the package using the following commands.
 ```bash
 cd mujoco_ros2_control
 source /opt/ros/${ROS_DISTRO}/setup.bash
-export CMAKE_BUILD_PARALLEL_LEVEL=4
-export MAKEFLAGS=-j4
-export NINJAFLAGS=-j4
+export CMAKE_BUILD_PARALLEL_LEVEL=2 && \
+export MAKEFLAGS=-j2 && \
+export NINJAFLAGS=-j2 && \
 colcon build --symlink-install \
   --packages-up-to mujoco_ros2_control mujoco_ros2_control_demos \
   --executor sequential --parallel-workers 2 \
   --cmake-force-configure \
   --cmake-args -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release && \
-  && . install/setup.bash
+  . install/setup.bash
 ```
 
 Run demos:
