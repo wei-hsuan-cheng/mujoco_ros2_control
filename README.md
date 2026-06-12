@@ -23,6 +23,12 @@ Make sure you have the following software installed if you are running on the lo
 Before build this package configure environment variable for mujoco directory.
 
 ```bash
+git clone https://github.com/wei-hsuan-cheng/mujoco_ros2_control.git
+
+cd <your_path>
+wget -O mujoco-3.3.7-linux-x86_64.tar.gz \
+  https://github.com/google-deepmind/mujoco/releases/download/3.3.7/mujoco-3.3.7-linux-x86_64.tar.gz && \
+tar -xzf mujoco-3.3.7-linux-x86_64.tar.gz
 export MUJOCO_DIR=<your_path>/mujoco-3.x.x # e.g. mujoco-3.3.7 (depends on your own version)
 ```
 
