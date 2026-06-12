@@ -26,6 +26,7 @@ Before build this package configure environment variable for mujoco directory.
 git clone https://github.com/wei-hsuan-cheng/mujoco_ros2_control.git
 
 cd <your_path>
+# Check x86_64 or aarch64
 wget -O mujoco-3.3.7-linux-x86_64.tar.gz \
   https://github.com/google-deepmind/mujoco/releases/download/3.3.7/mujoco-3.3.7-linux-x86_64.tar.gz && \
 tar -xzf mujoco-3.3.7-linux-x86_64.tar.gz
