@@ -18,6 +18,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <chrono>
+#include <cmath>
+#include <thread>
+
 #include "mujoco/mujoco.h"
 #include "rclcpp/rclcpp.hpp"
 
@@ -39,6 +43,21 @@ int main(int argc, const char **argv)
 
   RCLCPP_INFO_STREAM(node->get_logger(), "Initializing mujoco_ros2_control node...");
   auto model_path = node->get_parameter("mujoco_model_path").as_string();
+  bool mujoco_headless = false;
+  node->get_parameter_or("mujoco_headless", mujoco_headless, false);
+  double mujoco_real_time_factor = 1.0;
+  node->get_parameter_or("mujoco_real_time_factor", mujoco_real_time_factor, 1.0);
+  if (
+    !std::isfinite(mujoco_real_time_factor) ||
+    mujoco_real_time_factor <= 0.0)
+  {
+    RCLCPP_FATAL(
+      node->get_logger(),
+      "mujoco_real_time_factor must be finite and greater than 0.0, got %.6f",
+      mujoco_real_time_factor);
+    rclcpp::shutdown();
+    return 1;
+  }
 
   // load and compile model
   char error[1000] = "Could not load binary model";
@@ -68,45 +87,79 @@ int main(int argc, const char **argv)
   RCLCPP_INFO_STREAM(
     node->get_logger(), "Mujoco ros2 controller has been successfully initialized !");
 
-  // initialize mujoco visualization environment for rendering and cameras
-  if (!glfwInit())
-  {
-    mju_error("Could not initialize GLFW");
-  }
-  auto rendering = mujoco_ros2_control::MujocoRendering::get_instance();
-  rendering->init(mujoco_model, mujoco_data);
-  rendering->configure_camera_from_ros_params(node);
-  RCLCPP_INFO_STREAM(node->get_logger(), "Mujoco rendering has been successfully initialized !");
+  using SteadyClock = std::chrono::steady_clock;
+  constexpr double pacing_interval = 0.001;
+  const auto wall_time_start = SteadyClock::now();
+  const mjtNum simulation_time_start = mujoco_data->time;
+  mjtNum next_pacing_time = simulation_time_start + pacing_interval;
 
-  auto cameras = std::make_unique<mujoco_ros2_control::MujocoCameras>(node);
-  cameras->init(mujoco_model);
-
-  // run main loop, target real-time simulation and 60 fps rendering with cameras around 6 hz
-  mjtNum last_cam_update = mujoco_data->time;
-  while (rclcpp::ok() && !rendering->is_close_flag_raised())
-  {
-    // advance interactive simulation for 1/60 sec
-    //  Assuming MuJoCo can simulate faster than real-time, which it usually can,
-    //  this loop will finish on time for the next frame to be rendered at 60 fps.
-    //  Otherwise add a cpu timer and exit this loop when it is time to render.
-    mjtNum simstart = mujoco_data->time;
-    while (mujoco_data->time - simstart < 1.0 / 60.0)
+  auto update_simulation = [&]() {
+    mujoco_control.update();
+    if (mujoco_data->time < next_pacing_time)
     {
-      mujoco_control.update();
+      return;
     }
-    rendering->update();
 
-    // Updating cameras at ~6 Hz
-    // TODO(eholum): Break control and rendering into separate processes
-    if (simstart - last_cam_update > 1.0 / 6.0)
+    const auto elapsed_simulation_time =
+      std::chrono::duration<double>(
+        (mujoco_data->time - simulation_time_start) / mujoco_real_time_factor);
+    const auto target_wall_time = wall_time_start +
+      std::chrono::duration_cast<SteadyClock::duration>(elapsed_simulation_time);
+    std::this_thread::sleep_until(target_wall_time);
+    next_pacing_time = mujoco_data->time + pacing_interval;
+  };
+
+  RCLCPP_INFO(
+    node->get_logger(), "MuJoCo real-time pacing enabled (target RTF: %.3f)",
+    mujoco_real_time_factor);
+
+  if (mujoco_headless)
+  {
+    RCLCPP_INFO(node->get_logger(), "Running MuJoCo in headless mode");
+    while (rclcpp::ok())
     {
-      cameras->update(mujoco_model, mujoco_data);
-      last_cam_update = simstart;
+      update_simulation();
     }
   }
+  else
+  {
+    // initialize mujoco visualization environment for rendering and cameras
+    if (!glfwInit())
+    {
+      mju_error("Could not initialize GLFW");
+    }
+    auto rendering = mujoco_ros2_control::MujocoRendering::get_instance();
+    rendering->init(mujoco_model, mujoco_data);
+    rendering->configure_camera_from_ros_params(node);
+    RCLCPP_INFO_STREAM(node->get_logger(), "Mujoco rendering has been successfully initialized !");
 
-  rendering->close();
-  cameras->close();
+    auto cameras = std::make_unique<mujoco_ros2_control::MujocoCameras>(node);
+    cameras->init(mujoco_model);
+
+    // run main loop, target real-time simulation and 60 fps rendering with cameras around 6 hz
+    mjtNum last_cam_update = mujoco_data->time;
+    while (rclcpp::ok() && !rendering->is_close_flag_raised())
+    {
+      // Advance simulation by 1/60 second between rendered frames.
+      mjtNum simstart = mujoco_data->time;
+      while (mujoco_data->time - simstart < 1.0 / 60.0)
+      {
+        update_simulation();
+      }
+      rendering->update();
+
+      // Updating cameras at ~6 Hz
+      // TODO(eholum): Break control and rendering into separate processes
+      if (simstart - last_cam_update > 1.0 / 6.0)
+      {
+        cameras->update(mujoco_model, mujoco_data);
+        last_cam_update = simstart;
+      }
+    }
+
+    rendering->close();
+    cameras->close();
+  }
 
   // free MuJoCo model and data
   mj_deleteData(mujoco_data);
