@@ -22,6 +22,7 @@ find_package(urdf REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(control_toolbox REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
@@ -37,6 +38,7 @@ set(THIS_PACKAGE_DEPENDS
   urdf
   glfw3
   control_toolbox
+  std_srvs
   tf2_ros
   geometry_msgs
   nav_msgs

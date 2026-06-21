@@ -18,12 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <thread>
 
 #include "mujoco/mujoco.h"
 #include "rclcpp/rclcpp.hpp"
+#include "std_srvs/srv/trigger.hpp"
 
 #include "mujoco_ros2_control/mujoco_cameras.hpp"
 #include "mujoco_ros2_control/mujoco_rendering.hpp"
@@ -45,6 +47,8 @@ int main(int argc, const char **argv)
   auto model_path = node->get_parameter("mujoco_model_path").as_string();
   bool mujoco_headless = false;
   node->get_parameter_or("mujoco_headless", mujoco_headless, false);
+  bool mujoco_wait_to_start = false;
+  node->get_parameter_or("mujoco_wait_to_start", mujoco_wait_to_start, false);
   double mujoco_real_time_factor = 1.0;
   node->get_parameter_or("mujoco_real_time_factor", mujoco_real_time_factor, 1.0);
   if (
@@ -86,6 +90,32 @@ int main(int argc, const char **argv)
   mujoco_control.init();
   RCLCPP_INFO_STREAM(
     node->get_logger(), "Mujoco ros2 controller has been successfully initialized !");
+
+  std::atomic_bool simulation_started{!mujoco_wait_to_start};
+  auto start_service = node->create_service<std_srvs::srv::Trigger>(
+    "~/start",
+    [&simulation_started](
+      const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+      std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+      const bool was_started = simulation_started.exchange(true);
+      response->success = true;
+      response->message = was_started ? "MuJoCo is already running" : "MuJoCo simulation started";
+    });
+
+  auto node_executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+  node_executor->add_node(node);
+  std::thread node_thread([node_executor]() { node_executor->spin(); });
+
+  if (mujoco_wait_to_start) {
+    RCLCPP_INFO(
+      node->get_logger(),
+      "MuJoCo physics is waiting for /mujoco_ros2_control/start");
+    while (rclcpp::ok() && !simulation_started.load()) {
+      // Complete controller lifecycle switches and stage commands without advancing physics.
+      mujoco_control.update_controller_manager();
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
 
   using SteadyClock = std::chrono::steady_clock;
   constexpr double pacing_interval = 0.001;
@@ -159,6 +189,11 @@ int main(int argc, const char **argv)
 
     rendering->close();
     cameras->close();
+  }
+
+  node_executor->cancel();
+  if (node_thread.joinable()) {
+    node_thread.join();
   }
 
   // free MuJoCo model and data

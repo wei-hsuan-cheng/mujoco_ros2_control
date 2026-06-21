@@ -222,6 +222,15 @@ void MujocoRos2Control::update()
   mj_step2(mj_model_, mj_data_);
 }
 
+void MujocoRos2Control::update_controller_manager()
+{
+  const rclcpp::Time sim_time(0, 0, RCL_ROS_TIME);
+  const rclcpp::Duration zero_period(0, 0);
+  controller_manager_->read(sim_time, zero_period);
+  controller_manager_->update(sim_time, zero_period);
+  controller_manager_->write(sim_time, zero_period);
+}
+
 void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
 {
   // TODO(sangteak601)

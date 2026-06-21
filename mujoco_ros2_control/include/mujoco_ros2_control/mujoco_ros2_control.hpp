@@ -46,6 +46,7 @@ public:
   ~MujocoRos2Control();
   void init();
   void update();
+  void update_controller_manager();
 
 private:
   void publish_sim_time(rclcpp::Time sim_time);
