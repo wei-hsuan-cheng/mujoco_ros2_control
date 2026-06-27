@@ -22,11 +22,26 @@
 #include "hardware_interface/resource_manager.hpp"
 #include "hardware_interface/system_interface.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <functional>
 #include <utility>
 
 #include "mujoco_ros2_control/mujoco_ros2_control.hpp"
+
+namespace
+{
+std::string lower_copy(std::string value)
+{
+  std::transform(
+    value.begin(),
+    value.end(),
+    value.begin(),
+    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return value;
+}
+}  // namespace
 
 namespace mujoco_ros2_control
 {
@@ -252,6 +267,16 @@ void MujocoRos2Control::init_external_wrench()
     node_->declare_parameter<double>("mujoco_external_wrench_timeout", 0.1);
   if (!node_->has_parameter("mujoco_external_wrench_topic"))
     node_->declare_parameter<std::string>("mujoco_external_wrench_topic", "~/external_wrench");
+  if (!node_->has_parameter("mujoco_legacy_external_wrench_topic"))
+    node_->declare_parameter<std::string>(
+      "mujoco_legacy_external_wrench_topic",
+      "~/external_wrench_stamped");
+  if (!node_->has_parameter("mujoco_legacy_external_wrench_frame"))
+    node_->declare_parameter<std::string>("mujoco_legacy_external_wrench_frame", "world");
+  if (!node_->has_parameter("mujoco_external_wrench_visualization_topic"))
+    node_->declare_parameter<std::string>(
+      "mujoco_external_wrench_visualization_topic",
+      "~/external_wrench_visualization");
 
   external_wrench_enabled_ =
     node_->get_parameter("mujoco_external_wrench_enabled").as_bool();
@@ -259,6 +284,13 @@ void MujocoRos2Control::init_external_wrench()
     node_->get_parameter("mujoco_external_wrench_timeout").as_double();
   const auto external_wrench_topic =
     node_->get_parameter("mujoco_external_wrench_topic").as_string();
+  const auto legacy_external_wrench_topic =
+    node_->get_parameter("mujoco_legacy_external_wrench_topic").as_string();
+  legacy_external_wrench_frame_ = normalize_external_wrench_frame(
+    node_->get_parameter("mujoco_legacy_external_wrench_frame").as_string(),
+    "");
+  const auto external_wrench_visualization_topic =
+    node_->get_parameter("mujoco_external_wrench_visualization_topic").as_string();
 
   if (!std::isfinite(external_wrench_timeout_) || external_wrench_timeout_ < 0.0)
   {
@@ -275,19 +307,55 @@ void MujocoRos2Control::init_external_wrench()
     return;
   }
 
-  external_wrench_sub_ = node_->create_subscription<geometry_msgs::msg::WrenchStamped>(
+  external_wrench_sub_ =
+    node_->create_subscription<mujoco_ros2_control::msg::MujocoExternalWrench>(
     external_wrench_topic,
     rclcpp::QoS(10),
     std::bind(&MujocoRos2Control::external_wrench_callback, this, std::placeholders::_1));
+  legacy_external_wrench_sub_ = node_->create_subscription<geometry_msgs::msg::WrenchStamped>(
+    legacy_external_wrench_topic,
+    rclcpp::QoS(10),
+    std::bind(
+      &MujocoRos2Control::legacy_external_wrench_callback,
+      this,
+      std::placeholders::_1));
+  external_wrench_visualization_pub_ =
+    node_->create_publisher<geometry_msgs::msg::WrenchStamped>(
+      external_wrench_visualization_topic,
+      rclcpp::QoS(10));
 
   RCLCPP_INFO(
     logger_,
-    "MuJoCo external wrench topic enabled on %s with %.3f s timeout.",
+    "MuJoCo external wrench topic enabled on %s with %.3f s timeout. "
+    "Legacy WrenchStamped topic: %s, legacy wrench frame: %s, visualization topic: %s.",
     external_wrench_topic.c_str(),
-    external_wrench_timeout_);
+    external_wrench_timeout_,
+    legacy_external_wrench_topic.c_str(),
+    legacy_external_wrench_frame_.c_str(),
+    external_wrench_visualization_topic.c_str());
 }
 
 void MujocoRos2Control::external_wrench_callback(
+  const mujoco_ros2_control::msg::MujocoExternalWrench::SharedPtr msg)
+{
+  if (!external_wrench_enabled_) return;
+
+  if (msg->body_name.empty())
+  {
+    RCLCPP_WARN_THROTTLE(
+      logger_,
+      *node_->get_clock(),
+      2000,
+      "Ignoring external wrench command with empty body_name.");
+    return;
+  }
+
+  const std::string requested_frame =
+    msg->wrench_frame.empty() ? msg->header.frame_id : msg->wrench_frame;
+  queue_external_wrench_command(msg->body_name, requested_frame, msg->wrench);
+}
+
+void MujocoRos2Control::legacy_external_wrench_callback(
   const geometry_msgs::msg::WrenchStamped::SharedPtr msg)
 {
   if (!external_wrench_enabled_) return;
@@ -298,20 +366,32 @@ void MujocoRos2Control::external_wrench_callback(
       logger_,
       *node_->get_clock(),
       2000,
-      "Ignoring external wrench command with empty header.frame_id. "
+      "Ignoring legacy external wrench command with empty header.frame_id. "
       "Set frame_id to a MuJoCo body name.");
     return;
   }
 
+  queue_external_wrench_command(
+    msg->header.frame_id,
+    legacy_external_wrench_frame_,
+    msg->wrench);
+}
+
+void MujocoRos2Control::queue_external_wrench_command(
+  const std::string &body_name,
+  const std::string &wrench_frame,
+  const geometry_msgs::msg::Wrench &wrench)
+{
   PendingExternalWrench command;
-  command.body_name = msg->header.frame_id;
+  command.body_name = body_name;
+  command.wrench_frame = normalize_external_wrench_frame(wrench_frame, body_name);
   command.wrench = {
-    static_cast<mjtNum>(msg->wrench.force.x),
-    static_cast<mjtNum>(msg->wrench.force.y),
-    static_cast<mjtNum>(msg->wrench.force.z),
-    static_cast<mjtNum>(msg->wrench.torque.x),
-    static_cast<mjtNum>(msg->wrench.torque.y),
-    static_cast<mjtNum>(msg->wrench.torque.z)};
+    static_cast<mjtNum>(wrench.force.x),
+    static_cast<mjtNum>(wrench.force.y),
+    static_cast<mjtNum>(wrench.force.z),
+    static_cast<mjtNum>(wrench.torque.x),
+    static_cast<mjtNum>(wrench.torque.y),
+    static_cast<mjtNum>(wrench.torque.z)};
 
   for (const auto value : command.wrench)
   {
@@ -328,8 +408,107 @@ void MujocoRos2Control::external_wrench_callback(
     }
   }
 
-  std::lock_guard<std::mutex> lock(external_wrench_mutex_);
-  pending_external_wrenches_.push_back(std::move(command));
+  {
+    std::lock_guard<std::mutex> lock(external_wrench_mutex_);
+    pending_external_wrenches_.push_back(std::move(command));
+  }
+}
+
+std::string MujocoRos2Control::normalize_external_wrench_frame(
+  const std::string &wrench_frame,
+  const std::string &body_name) const
+{
+  const std::string frame = lower_copy(wrench_frame);
+  if (frame.empty() || frame == "body" || frame == "local")
+  {
+    return body_name;
+  }
+  if (frame == "world" || frame == "global")
+  {
+    return "world";
+  }
+  return wrench_frame;
+}
+
+bool MujocoRos2Control::transform_external_wrench_to_world(
+  const ActiveExternalWrench &command,
+  int target_body_id,
+  std::array<mjtNum, 6> &world_wrench) const
+{
+  if (lower_copy(command.wrench_frame) == "world")
+  {
+    world_wrench = command.wrench;
+    return true;
+  }
+
+  int frame_body_id = mj_name2id(mj_model_, mjOBJ_BODY, command.wrench_frame.c_str());
+  if (frame_body_id <= 0)
+  {
+    frame_body_id = target_body_id;
+    RCLCPP_WARN_THROTTLE(
+      logger_,
+      *node_->get_clock(),
+      2000,
+      "External wrench frame '%s' is not a MuJoCo body or world frame. "
+      "Using target body '%s' as the wrench frame.",
+      command.wrench_frame.c_str(),
+      command.body_name.c_str());
+  }
+
+  const mjtNum *xmat = mj_data_->xmat + 9 * frame_body_id;
+  for (int row = 0; row < 3; ++row)
+  {
+    world_wrench[static_cast<size_t>(row)] =
+      xmat[3 * row + 0] * command.wrench[0] +
+      xmat[3 * row + 1] * command.wrench[1] +
+      xmat[3 * row + 2] * command.wrench[2];
+    world_wrench[static_cast<size_t>(3 + row)] =
+      xmat[3 * row + 0] * command.wrench[3] +
+      xmat[3 * row + 1] * command.wrench[4] +
+      xmat[3 * row + 2] * command.wrench[5];
+  }
+
+  return true;
+}
+
+void MujocoRos2Control::transform_world_wrench_to_body(
+  int body_id,
+  const std::array<mjtNum, 6> &world_wrench,
+  std::array<mjtNum, 6> &body_wrench) const
+{
+  const mjtNum *xmat = mj_data_->xmat + 9 * body_id;
+  for (int col = 0; col < 3; ++col)
+  {
+    body_wrench[static_cast<size_t>(col)] =
+      xmat[col] * world_wrench[0] +
+      xmat[3 + col] * world_wrench[1] +
+      xmat[6 + col] * world_wrench[2];
+    body_wrench[static_cast<size_t>(3 + col)] =
+      xmat[col] * world_wrench[3] +
+      xmat[3 + col] * world_wrench[4] +
+      xmat[6 + col] * world_wrench[5];
+  }
+}
+
+void MujocoRos2Control::publish_external_wrench_visualization(
+  const std::string &body_name,
+  const std::array<mjtNum, 6> &body_wrench)
+{
+  if (!external_wrench_visualization_pub_) return;
+
+  geometry_msgs::msg::WrenchStamped visualization_msg;
+  const auto stamp = node_->get_clock()->now();
+  visualization_msg.header.stamp.sec = static_cast<int32_t>(stamp.seconds());
+  visualization_msg.header.stamp.nanosec =
+    static_cast<uint32_t>(stamp.nanoseconds() % 1000000000);
+  visualization_msg.header.frame_id = body_name;
+  visualization_msg.wrench.force.x = static_cast<double>(body_wrench[0]);
+  visualization_msg.wrench.force.y = static_cast<double>(body_wrench[1]);
+  visualization_msg.wrench.force.z = static_cast<double>(body_wrench[2]);
+  visualization_msg.wrench.torque.x = static_cast<double>(body_wrench[3]);
+  visualization_msg.wrench.torque.y = static_cast<double>(body_wrench[4]);
+  visualization_msg.wrench.torque.z = static_cast<double>(body_wrench[5]);
+  external_wrench_visualization_pub_->publish(visualization_msg);
 }
 
 void MujocoRos2Control::apply_external_wrenches()
@@ -361,6 +540,7 @@ void MujocoRos2Control::apply_external_wrenches()
 
     ActiveExternalWrench active_command;
     active_command.body_name = command.body_name;
+    active_command.wrench_frame = command.wrench_frame;
     active_command.wrench = command.wrench;
     active_command.end_time = mj_data_->time + external_wrench_timeout_;
     active_external_wrenches_[body_id] = active_command;
@@ -370,14 +550,26 @@ void MujocoRos2Control::apply_external_wrenches()
   {
     if (mj_data_->time > it->second.end_time)
     {
+      publish_external_wrench_visualization(it->second.body_name, std::array<mjtNum, 6>{});
       it = active_external_wrenches_.erase(it);
+      continue;
+    }
+
+    std::array<mjtNum, 6> world_wrench{};
+    if (!transform_external_wrench_to_world(it->second, it->first, world_wrench))
+    {
+      ++it;
       continue;
     }
 
     for (int i = 0; i < 6; ++i)
     {
-      mj_data_->xfrc_applied[6 * it->first + i] = it->second.wrench[static_cast<size_t>(i)];
+      mj_data_->xfrc_applied[6 * it->first + i] = world_wrench[static_cast<size_t>(i)];
     }
+
+    std::array<mjtNum, 6> body_wrench{};
+    transform_world_wrench_to_body(it->first, world_wrench, body_wrench);
+    publish_external_wrench_visualization(it->second.body_name, body_wrench);
     ++it;
   }
 }

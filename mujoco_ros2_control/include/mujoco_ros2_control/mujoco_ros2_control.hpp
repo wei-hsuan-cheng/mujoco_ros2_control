@@ -31,6 +31,7 @@
 #include "controller_manager/controller_manager.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/wrench_stamped.hpp"
+#include "mujoco_ros2_control/msg/mujoco_external_wrench.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -56,19 +57,40 @@ private:
   struct PendingExternalWrench
   {
     std::string body_name;
+    std::string wrench_frame;
     std::array<mjtNum, 6> wrench{};
   };
 
   struct ActiveExternalWrench
   {
     std::string body_name;
+    std::string wrench_frame;
     std::array<mjtNum, 6> wrench{};
     double end_time{0.0};
   };
 
   void publish_sim_time(rclcpp::Time sim_time);
   void init_external_wrench();
-  void external_wrench_callback(const geometry_msgs::msg::WrenchStamped::SharedPtr msg);
+  void external_wrench_callback(const mujoco_ros2_control::msg::MujocoExternalWrench::SharedPtr msg);
+  void legacy_external_wrench_callback(const geometry_msgs::msg::WrenchStamped::SharedPtr msg);
+  void queue_external_wrench_command(
+    const std::string &body_name,
+    const std::string &wrench_frame,
+    const geometry_msgs::msg::Wrench &wrench);
+  std::string normalize_external_wrench_frame(
+    const std::string &wrench_frame,
+    const std::string &body_name) const;
+  bool transform_external_wrench_to_world(
+    const ActiveExternalWrench &command,
+    int target_body_id,
+    std::array<mjtNum, 6> &world_wrench) const;
+  void transform_world_wrench_to_body(
+    int body_id,
+    const std::array<mjtNum, 6> &world_wrench,
+    std::array<mjtNum, 6> &body_wrench) const;
+  void publish_external_wrench_visualization(
+    const std::string &body_name,
+    const std::array<mjtNum, 6> &body_wrench);
   void apply_external_wrenches();
   void init_ground_truth();
   void publish_ground_truth(const rclcpp::Time &stamp);
@@ -91,7 +113,10 @@ private:
 
   bool external_wrench_enabled_{true};
   double external_wrench_timeout_{0.1};
-  rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr external_wrench_sub_;
+  std::string legacy_external_wrench_frame_{"world"};
+  rclcpp::Subscription<mujoco_ros2_control::msg::MujocoExternalWrench>::SharedPtr external_wrench_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr legacy_external_wrench_sub_;
+  rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr external_wrench_visualization_pub_;
   std::mutex external_wrench_mutex_;
   std::vector<PendingExternalWrench> pending_external_wrenches_;
   std::unordered_map<int, ActiveExternalWrench> active_external_wrenches_;

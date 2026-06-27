@@ -25,7 +25,15 @@ find_package(control_toolbox REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/MujocoExternalWrench.msg"
+  DEPENDENCIES std_msgs geometry_msgs
+)
+ament_export_dependencies(rosidl_default_runtime)
 
 
 set(THIS_PACKAGE_DEPENDS
@@ -41,6 +49,7 @@ set(THIS_PACKAGE_DEPENDS
   std_srvs
   tf2_ros
   geometry_msgs
+  std_msgs
   nav_msgs
 )
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
@@ -80,15 +89,18 @@ install(TARGETS
 )
 
 # TODO: make it simple
-add_executable(mujoco_ros2_control
+add_executable(mujoco_ros2_control_node
   src/mujoco_ros2_control_node.cpp
   src/mujoco_rendering.cpp
   src/mujoco_ros2_control.cpp
   src/mujoco_cameras.cpp
 )
-ament_target_dependencies(mujoco_ros2_control ${THIS_PACKAGE_DEPENDS})
-target_link_libraries(mujoco_ros2_control ${MUJOCO_LIB} glfw)
-target_include_directories(mujoco_ros2_control
+set_target_properties(mujoco_ros2_control_node
+  PROPERTIES OUTPUT_NAME mujoco_ros2_control)
+ament_target_dependencies(mujoco_ros2_control_node ${THIS_PACKAGE_DEPENDS})
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(mujoco_ros2_control_node ${MUJOCO_LIB} glfw "${cpp_typesupport_target}")
+target_include_directories(mujoco_ros2_control_node
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -96,7 +108,7 @@ target_include_directories(mujoco_ros2_control
     ${EIGEN3_INCLUDE_DIR})
 
 install(TARGETS
-  mujoco_ros2_control
+  mujoco_ros2_control_node
   DESTINATION lib/${PROJECT_NAME})
 
 pluginlib_export_plugin_description_file(mujoco_ros2_control mujoco_system_plugins.xml)
