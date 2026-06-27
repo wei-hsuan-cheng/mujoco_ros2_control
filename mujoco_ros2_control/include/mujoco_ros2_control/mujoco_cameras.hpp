@@ -69,8 +69,12 @@ public:
 
 private:
   void register_cameras(const mjModel *mujoco_model);
+  bool should_publish(const mjData *mujoco_data);
 
   rclcpp::Node::SharedPtr node_;
+  double publish_rate_{100.0};
+  rclcpp::Duration publish_period_{0, 0};
+  rclcpp::Time last_publish_time_{0, 0, RCL_ROS_TIME};
 
   // Rendering options for the cameras, currently hard coded to defaults
   mjvOption mjv_opt_;

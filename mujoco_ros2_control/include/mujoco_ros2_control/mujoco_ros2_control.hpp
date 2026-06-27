@@ -69,6 +69,8 @@ private:
     double end_time{0.0};
   };
 
+  void init_publish_rate();
+  bool should_publish(const rclcpp::Time &stamp);
   void publish_sim_time(rclcpp::Time sim_time);
   void init_external_wrench();
   void external_wrench_callback(const mujoco_ros2_control::msg::MujocoExternalWrench::SharedPtr msg);
@@ -110,6 +112,10 @@ private:
 
   rclcpp::Time last_update_sim_time_ros_;
   rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_publisher_;
+  double mujoco_publish_rate_{100.0};
+  rclcpp::Duration mujoco_publish_period_{0, 0};
+  rclcpp::Time last_mujoco_publish_time_{0, 0, RCL_ROS_TIME};
+  bool publish_this_step_{true};
 
   bool external_wrench_enabled_{true};
   double external_wrench_timeout_{0.1};

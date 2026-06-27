@@ -20,6 +20,8 @@
 
 #include "mujoco_ros2_control/mujoco_cameras.hpp"
 
+#include <cmath>
+
 #include "sensor_msgs/image_encodings.hpp"
 
 namespace mujoco_ros2_control
@@ -29,6 +31,27 @@ MujocoCameras::MujocoCameras(rclcpp::Node::SharedPtr &node) : node_(node) {}
 
 void MujocoCameras::init(mjModel *mujoco_model)
 {
+  if (!node_->has_parameter("mujoco_publish_rate"))
+    node_->declare_parameter<double>("mujoco_publish_rate", 100.0);
+
+  publish_rate_ = node_->get_parameter("mujoco_publish_rate").as_double();
+  if (!std::isfinite(publish_rate_))
+  {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "Invalid mujoco_publish_rate %.3f for MuJoCo cameras. Using 100.0 Hz.",
+      publish_rate_);
+    publish_rate_ = 100.0;
+  }
+  if (publish_rate_ > 0.0)
+  {
+    publish_period_ = rclcpp::Duration::from_seconds(1.0 / publish_rate_);
+  }
+  else
+  {
+    publish_period_ = rclcpp::Duration(0, 0);
+  }
+
   // initialize visualization data structures
   mjv_defaultOption(&mjv_opt_);
   mjv_defaultScene(&mjv_scn_);
@@ -44,6 +67,11 @@ void MujocoCameras::init(mjModel *mujoco_model)
 
 void MujocoCameras::update(mjModel *mujoco_model, mjData *mujoco_data)
 {
+  if (!should_publish(mujoco_data))
+  {
+    return;
+  }
+
   // Rendering is done offscreen
   mjr_setBuffer(mjFB_OFFSCREEN, &mjr_con_);
 
@@ -96,6 +124,25 @@ void MujocoCameras::update(mjModel *mujoco_model, mjData *mujoco_data)
     camera.depth_image_pub->publish(camera.depth_image);
     camera.camera_info_pub->publish(camera.camera_info);
   }
+}
+
+bool MujocoCameras::should_publish(const mjData *mujoco_data)
+{
+  if (publish_period_ <= rclcpp::Duration(0, 0))
+  {
+    return true;
+  }
+
+  const auto sim_time = mujoco_data->time;
+  const int sim_time_sec = static_cast<int>(sim_time);
+  const int sim_time_nanosec = static_cast<int>((sim_time - sim_time_sec) * 1000000000);
+  const rclcpp::Time stamp(sim_time_sec, sim_time_nanosec, RCL_ROS_TIME);
+  if ((stamp - last_publish_time_) < publish_period_)
+  {
+    return false;
+  }
+  last_publish_time_ = stamp;
+  return true;
 }
 
 void MujocoCameras::close()

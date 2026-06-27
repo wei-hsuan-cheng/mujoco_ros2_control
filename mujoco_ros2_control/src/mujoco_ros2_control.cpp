@@ -105,6 +105,7 @@ std::string MujocoRos2Control::get_robot_description()
 void MujocoRos2Control::init()
 {
   clock_publisher_ = node_->create_publisher<rosgraph_msgs::msg::Clock>("/clock", 10);
+  init_publish_rate();
   init_external_wrench();
 
   std::string urdf_string = this->get_robot_description();
@@ -218,6 +219,7 @@ void MujocoRos2Control::update()
 
   rclcpp::Time sim_time_ros(sim_time_sec, sim_time_nanosec, RCL_ROS_TIME);
   rclcpp::Duration sim_period = sim_time_ros - last_update_sim_time_ros_;
+  publish_this_step_ = should_publish(sim_time_ros);
 
   publish_sim_time(sim_time_ros);
   if (gt_enabled_)
@@ -251,8 +253,53 @@ void MujocoRos2Control::update_controller_manager()
   controller_manager_->write(sim_time, zero_period);
 }
 
+void MujocoRos2Control::init_publish_rate()
+{
+  if (!node_->has_parameter("mujoco_publish_rate"))
+    node_->declare_parameter<double>("mujoco_publish_rate", 100.0);
+
+  mujoco_publish_rate_ = node_->get_parameter("mujoco_publish_rate").as_double();
+  if (!std::isfinite(mujoco_publish_rate_))
+  {
+    RCLCPP_WARN(
+      logger_,
+      "Invalid mujoco_publish_rate %.3f. Using 100.0 Hz.",
+      mujoco_publish_rate_);
+    mujoco_publish_rate_ = 100.0;
+  }
+
+  if (mujoco_publish_rate_ > 0.0)
+  {
+    mujoco_publish_period_ = rclcpp::Duration::from_seconds(1.0 / mujoco_publish_rate_);
+  }
+  else
+  {
+    mujoco_publish_period_ = rclcpp::Duration(0, 0);
+  }
+
+  const std::string rate_text =
+    mujoco_publish_rate_ > 0.0 ? std::to_string(mujoco_publish_rate_) + " Hz" : "unlimited";
+  RCLCPP_INFO(logger_, "MuJoCo publish rate limit: %s.", rate_text.c_str());
+}
+
+bool MujocoRos2Control::should_publish(const rclcpp::Time &stamp)
+{
+  if (mujoco_publish_period_ <= rclcpp::Duration(0, 0))
+  {
+    return true;
+  }
+  if ((stamp - last_mujoco_publish_time_) < mujoco_publish_period_)
+  {
+    return false;
+  }
+  last_mujoco_publish_time_ = stamp;
+  return true;
+}
+
 void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
 {
+  if (!publish_this_step_) return;
+
   // TODO(sangteak601)
   rosgraph_msgs::msg::Clock sim_time_msg;
   sim_time_msg.clock = sim_time;
@@ -569,7 +616,10 @@ void MujocoRos2Control::apply_external_wrenches()
 
     std::array<mjtNum, 6> body_wrench{};
     transform_world_wrench_to_body(it->first, world_wrench, body_wrench);
-    publish_external_wrench_visualization(it->second.body_name, body_wrench);
+    if (publish_this_step_)
+    {
+      publish_external_wrench_visualization(it->second.body_name, body_wrench);
+    }
     ++it;
   }
 }
@@ -711,6 +761,10 @@ void MujocoRos2Control::init_ground_truth()
 void MujocoRos2Control::publish_ground_truth(const rclcpp::Time &stamp)
 {
   if (!gt_enabled_)
+  {
+    return;
+  }
+  if (!publish_this_step_)
   {
     return;
   }
