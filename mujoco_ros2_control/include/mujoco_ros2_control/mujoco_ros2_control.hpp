@@ -21,12 +21,16 @@
 #ifndef MUJOCO_ROS2_CONTROL__MUJOCO_ROS2_CONTROL_HPP_
 #define MUJOCO_ROS2_CONTROL__MUJOCO_ROS2_CONTROL_HPP_
 
+#include <array>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "controller_manager/controller_manager.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
+#include "geometry_msgs/msg/wrench_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -49,7 +53,23 @@ public:
   void update_controller_manager();
 
 private:
+  struct PendingExternalWrench
+  {
+    std::string body_name;
+    std::array<mjtNum, 6> wrench{};
+  };
+
+  struct ActiveExternalWrench
+  {
+    std::string body_name;
+    std::array<mjtNum, 6> wrench{};
+    double end_time{0.0};
+  };
+
   void publish_sim_time(rclcpp::Time sim_time);
+  void init_external_wrench();
+  void external_wrench_callback(const geometry_msgs::msg::WrenchStamped::SharedPtr msg);
+  void apply_external_wrenches();
   void init_ground_truth();
   void publish_ground_truth(const rclcpp::Time &stamp);
   std::string get_robot_description();
@@ -68,6 +88,13 @@ private:
 
   rclcpp::Time last_update_sim_time_ros_;
   rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_publisher_;
+
+  bool external_wrench_enabled_{true};
+  double external_wrench_timeout_{0.1};
+  rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr external_wrench_sub_;
+  std::mutex external_wrench_mutex_;
+  std::vector<PendingExternalWrench> pending_external_wrenches_;
+  std::unordered_map<int, ActiveExternalWrench> active_external_wrenches_;
 
   bool gt_enabled_{false};
   bool gt_publish_tf_{false};

@@ -23,6 +23,8 @@
 #include "hardware_interface/system_interface.hpp"
 
 #include <cmath>
+#include <functional>
+#include <utility>
 
 #include "mujoco_ros2_control/mujoco_ros2_control.hpp"
 
@@ -88,6 +90,7 @@ std::string MujocoRos2Control::get_robot_description()
 void MujocoRos2Control::init()
 {
   clock_publisher_ = node_->create_publisher<rosgraph_msgs::msg::Clock>("/clock", 10);
+  init_external_wrench();
 
   std::string urdf_string = this->get_robot_description();
 
@@ -219,6 +222,8 @@ void MujocoRos2Control::update()
   // use same time as for read and update call - this is how it is done in ros2_control_node
   controller_manager_->write(sim_time_ros, sim_period);
 
+  apply_external_wrenches();
+
   mj_step2(mj_model_, mj_data_);
 }
 
@@ -237,6 +242,144 @@ void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
   rosgraph_msgs::msg::Clock sim_time_msg;
   sim_time_msg.clock = sim_time;
   clock_publisher_->publish(sim_time_msg);
+}
+
+void MujocoRos2Control::init_external_wrench()
+{
+  if (!node_->has_parameter("mujoco_external_wrench_enabled"))
+    node_->declare_parameter<bool>("mujoco_external_wrench_enabled", true);
+  if (!node_->has_parameter("mujoco_external_wrench_timeout"))
+    node_->declare_parameter<double>("mujoco_external_wrench_timeout", 0.1);
+  if (!node_->has_parameter("mujoco_external_wrench_topic"))
+    node_->declare_parameter<std::string>("mujoco_external_wrench_topic", "~/external_wrench");
+
+  external_wrench_enabled_ =
+    node_->get_parameter("mujoco_external_wrench_enabled").as_bool();
+  external_wrench_timeout_ =
+    node_->get_parameter("mujoco_external_wrench_timeout").as_double();
+  const auto external_wrench_topic =
+    node_->get_parameter("mujoco_external_wrench_topic").as_string();
+
+  if (!std::isfinite(external_wrench_timeout_) || external_wrench_timeout_ < 0.0)
+  {
+    RCLCPP_WARN(
+      logger_,
+      "Invalid mujoco_external_wrench_timeout %.3f. Using 0.1 seconds.",
+      external_wrench_timeout_);
+    external_wrench_timeout_ = 0.1;
+  }
+
+  if (!external_wrench_enabled_)
+  {
+    RCLCPP_INFO(logger_, "MuJoCo external wrench topic is disabled.");
+    return;
+  }
+
+  external_wrench_sub_ = node_->create_subscription<geometry_msgs::msg::WrenchStamped>(
+    external_wrench_topic,
+    rclcpp::QoS(10),
+    std::bind(&MujocoRos2Control::external_wrench_callback, this, std::placeholders::_1));
+
+  RCLCPP_INFO(
+    logger_,
+    "MuJoCo external wrench topic enabled on %s with %.3f s timeout.",
+    external_wrench_topic.c_str(),
+    external_wrench_timeout_);
+}
+
+void MujocoRos2Control::external_wrench_callback(
+  const geometry_msgs::msg::WrenchStamped::SharedPtr msg)
+{
+  if (!external_wrench_enabled_) return;
+
+  if (msg->header.frame_id.empty())
+  {
+    RCLCPP_WARN_THROTTLE(
+      logger_,
+      *node_->get_clock(),
+      2000,
+      "Ignoring external wrench command with empty header.frame_id. "
+      "Set frame_id to a MuJoCo body name.");
+    return;
+  }
+
+  PendingExternalWrench command;
+  command.body_name = msg->header.frame_id;
+  command.wrench = {
+    static_cast<mjtNum>(msg->wrench.force.x),
+    static_cast<mjtNum>(msg->wrench.force.y),
+    static_cast<mjtNum>(msg->wrench.force.z),
+    static_cast<mjtNum>(msg->wrench.torque.x),
+    static_cast<mjtNum>(msg->wrench.torque.y),
+    static_cast<mjtNum>(msg->wrench.torque.z)};
+
+  for (const auto value : command.wrench)
+  {
+    if (!std::isfinite(static_cast<double>(value)))
+    {
+      RCLCPP_WARN_THROTTLE(
+        logger_,
+        *node_->get_clock(),
+        2000,
+        "Ignoring external wrench command for body '%s' because it contains "
+        "non-finite values.",
+        command.body_name.c_str());
+      return;
+    }
+  }
+
+  std::lock_guard<std::mutex> lock(external_wrench_mutex_);
+  pending_external_wrenches_.push_back(std::move(command));
+}
+
+void MujocoRos2Control::apply_external_wrenches()
+{
+  if (!external_wrench_enabled_) return;
+
+  mju_zero(mj_data_->xfrc_applied, 6 * mj_model_->nbody);
+
+  std::vector<PendingExternalWrench> pending_commands;
+  {
+    std::lock_guard<std::mutex> lock(external_wrench_mutex_);
+    pending_commands.swap(pending_external_wrenches_);
+  }
+
+  for (const auto &command : pending_commands)
+  {
+    const int body_id = mj_name2id(mj_model_, mjOBJ_BODY, command.body_name.c_str());
+    if (body_id <= 0)
+    {
+      RCLCPP_WARN_THROTTLE(
+        logger_,
+        *node_->get_clock(),
+        2000,
+        "Ignoring external wrench command for unknown or unsupported MuJoCo "
+        "body '%s'. header.frame_id must be a non-world body name.",
+        command.body_name.c_str());
+      continue;
+    }
+
+    ActiveExternalWrench active_command;
+    active_command.body_name = command.body_name;
+    active_command.wrench = command.wrench;
+    active_command.end_time = mj_data_->time + external_wrench_timeout_;
+    active_external_wrenches_[body_id] = active_command;
+  }
+
+  for (auto it = active_external_wrenches_.begin(); it != active_external_wrenches_.end();)
+  {
+    if (mj_data_->time > it->second.end_time)
+    {
+      it = active_external_wrenches_.erase(it);
+      continue;
+    }
+
+    for (int i = 0; i < 6; ++i)
+    {
+      mj_data_->xfrc_applied[6 * it->first + i] = it->second.wrench[static_cast<size_t>(i)];
+    }
+    ++it;
+  }
 }
 
 void MujocoRos2Control::init_ground_truth()
