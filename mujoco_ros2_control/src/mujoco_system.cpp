@@ -20,6 +20,9 @@
 
 #include "mujoco_ros2_control/mujoco_system.hpp"
 
+#include <algorithm>
+#include <cctype>
+
 namespace mujoco_ros2_control
 {
 namespace
@@ -45,6 +48,14 @@ bool has_sensor_param(
   const hardware_interface::ComponentInfo &sensor, const std::string &param_name)
 {
   return sensor.parameters.find(param_name) != sensor.parameters.end();
+}
+
+std::string lower_copy(std::string value)
+{
+  std::transform(
+    value.begin(), value.end(), value.begin(),
+    [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+  return value;
 }
 
 std::string get_sensor_param_or_default(
@@ -76,7 +87,11 @@ hardware_interface::return_type MujocoSystem::read(
   {
     joint_state.position = mj_data_->qpos[joint_state.mj_pos_adr];
     joint_state.velocity = mj_data_->qvel[joint_state.mj_vel_adr];
-    joint_state.effort = mj_data_->qfrc_applied[joint_state.mj_vel_adr];
+    // Report the total generalized effort applied at this DOF. For actuator-backed
+    // joints this includes MuJoCo motor output; qfrc_applied remains available for
+    // direct generalized forces such as external plugins.
+    joint_state.effort = mj_data_->qfrc_actuator[joint_state.mj_vel_adr] +
+      mj_data_->qfrc_applied[joint_state.mj_vel_adr];
   }
 
   // IMU Sensor data
@@ -183,6 +198,15 @@ hardware_interface::return_type MujocoSystem::write(
 
       mj_data_->qfrc_applied[joint_state.mj_vel_adr] =
         clamp(joint_state.effort_command, min_eff, max_eff);
+
+      if (use_actuator_effort_command_ && joint_state.mj_actuator_id >= 0)
+      {
+        // Effort commands drive the MuJoCo motor through ctrl,
+        // so actuator transmission and actuator force limits apply.
+        mj_data_->ctrl[joint_state.mj_actuator_id] =
+          mj_data_->qfrc_applied[joint_state.mj_vel_adr];
+        mj_data_->qfrc_applied[joint_state.mj_vel_adr] = 0.0;
+      }
     }
   }
   return hardware_interface::return_type::OK;
@@ -196,6 +220,17 @@ bool MujocoSystem::init_sim(
   mj_data_ = mujoco_data;
 
   logger_ = rclcpp::get_logger("mujoco_system");
+
+  const auto effort_mode_it =
+    hardware_info.hardware_parameters.find("mujoco_effort_command_mode");
+  if (effort_mode_it != hardware_info.hardware_parameters.end())
+  {
+    const auto effort_mode = lower_copy(effort_mode_it->second);
+    use_actuator_effort_command_ = effort_mode == "actuator" || effort_mode == "ctrl";
+  }
+  RCLCPP_INFO(
+    logger_, "Effort command mode: %s",
+    use_actuator_effort_command_ ? "mujoco actuator ctrl" : "direct qfrc_applied");
 
   register_joints(urdf_model, hardware_info);
   register_sensors(urdf_model, hardware_info);
@@ -226,6 +261,16 @@ void MujocoSystem::register_joints(
     joint_state.mj_joint_type = mj_model_->jnt_type[mujoco_joint_id];
     joint_state.mj_pos_adr = mj_model_->jnt_qposadr[mujoco_joint_id];
     joint_state.mj_vel_adr = mj_model_->jnt_dofadr[mujoco_joint_id];
+
+    for (int actuator_id = 0; actuator_id < mj_model_->nu; ++actuator_id)
+    {
+      if (mj_model_->actuator_trntype[actuator_id] == mjTRN_JOINT &&
+        mj_model_->actuator_trnid[2 * actuator_id] == mujoco_joint_id)
+      {
+        joint_state.mj_actuator_id = actuator_id;
+        break;
+      }
+    }
 
     joint_states_.at(joint_index) = joint_state;
     JointState &last_joint_state = joint_states_.at(joint_index);

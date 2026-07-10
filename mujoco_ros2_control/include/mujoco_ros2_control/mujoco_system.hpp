@@ -82,6 +82,7 @@ public:
     int mj_joint_type;
     int mj_pos_adr;
     int mj_vel_adr;
+    int mj_actuator_id{-1};
   };
 
   template <typename T>
@@ -141,6 +142,7 @@ private:
 
   mjModel *mj_model_;
   mjData *mj_data_;
+  bool use_actuator_effort_command_{false};
 
   rclcpp::Logger logger_;  // TODO(sangteak601): delete?
 };
