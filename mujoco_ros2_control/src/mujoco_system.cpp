@@ -29,6 +29,7 @@ constexpr char PARAM_MUJOCO_TORQUE_SENSOR_NAME[] = "mujoco_torque_sensor_name";
 constexpr char PARAM_MUJOCO_QUAT_SENSOR_NAME[] = "mujoco_quat_sensor_name";
 constexpr char PARAM_MUJOCO_GYRO_SENSOR_NAME[] = "mujoco_gyro_sensor_name";
 constexpr char PARAM_MUJOCO_ACCEL_SENSOR_NAME[] = "mujoco_accel_sensor_name";
+constexpr char PARAM_MUJOCO_BODY_NAME[] = "mujoco_body_name";
 
 std::string strip_suffix_after_last_underscore(const std::string &name)
 {
@@ -111,6 +112,8 @@ hardware_interface::return_type MujocoSystem::read(
     data.torque.data.y() = -mj_data_->sensordata[data.torque.mj_sensor_index + 1];
     data.torque.data.z() = -mj_data_->sensordata[data.torque.mj_sensor_index + 2];
   }
+
+  update_body_state_data();
 
   return hardware_interface::return_type::OK;
 }
@@ -371,6 +374,10 @@ void MujocoSystem::register_joints(
 void MujocoSystem::register_sensors(
   const urdf::Model & /* urdf_model */, const hardware_interface::HardwareInfo &hardware_info)
 {
+  body_state_data_.reserve(hardware_info.sensors.size());
+  ft_sensor_data_.reserve(hardware_info.sensors.size());
+  imu_sensor_data_.reserve(hardware_info.sensors.size());
+
   for (size_t sensor_index = 0; sensor_index < hardware_info.sensors.size(); sensor_index++)
   {
     auto sensor = hardware_info.sensors.at(sensor_index);
@@ -382,8 +389,98 @@ void MujocoSystem::register_sensors(
       has_sensor_param(sensor, PARAM_MUJOCO_QUAT_SENSOR_NAME) &&
       has_sensor_param(sensor, PARAM_MUJOCO_GYRO_SENSOR_NAME) &&
       has_sensor_param(sensor, PARAM_MUJOCO_ACCEL_SENSOR_NAME);
+    const bool has_body_state_mapping = has_sensor_param(sensor, PARAM_MUJOCO_BODY_NAME);
 
-    if (has_explicit_ft_mapping || sensor.name.find("_fts") != std::string::npos)
+    if (has_body_state_mapping)
+    {
+      BodyStateData sensor_data;
+      sensor_data.name = sensor.name;
+      sensor_data.body_name = sensor.parameters.at(PARAM_MUJOCO_BODY_NAME);
+      sensor_data.mj_body_id = mj_name2id(mj_model_, mjOBJ_BODY, sensor_data.body_name.c_str());
+
+      if (sensor_data.mj_body_id == -1)
+      {
+        RCLCPP_ERROR_STREAM(
+          logger_,
+          "Failed to find MuJoCo body for body-state sensor, sensor name: "
+            << sensor.name << ", body name: " << sensor_data.body_name);
+        continue;
+      }
+
+      body_state_data_.push_back(sensor_data);
+      auto &last_sensor_data = body_state_data_.back();
+
+      for (const auto &state_if : sensor.state_interfaces)
+      {
+        if (state_if.name == "position.x")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.position.x());
+        }
+        else if (state_if.name == "position.y")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.position.y());
+        }
+        else if (state_if.name == "position.z")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.position.z());
+        }
+        else if (state_if.name == "orientation.w")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.orientation.w());
+        }
+        else if (state_if.name == "orientation.x")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.orientation.x());
+        }
+        else if (state_if.name == "orientation.y")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.orientation.y());
+        }
+        else if (state_if.name == "orientation.z")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.orientation.z());
+        }
+        else if (state_if.name == "linear_velocity.x")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.linear_velocity.x());
+        }
+        else if (state_if.name == "linear_velocity.y")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.linear_velocity.y());
+        }
+        else if (state_if.name == "linear_velocity.z")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.linear_velocity.z());
+        }
+        else if (state_if.name == "angular_velocity.x")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.angular_velocity.x());
+        }
+        else if (state_if.name == "angular_velocity.y")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.angular_velocity.y());
+        }
+        else if (state_if.name == "angular_velocity.z")
+        {
+          state_interfaces_.emplace_back(
+            sensor.name, state_if.name, &last_sensor_data.angular_velocity.z());
+        }
+      }
+    }
+
+    else if (has_explicit_ft_mapping || sensor.name.find("_fts") != std::string::npos)
     {
       FTSensorData sensor_data;
       sensor_data.name = sensor.name;
@@ -536,6 +633,41 @@ void MujocoSystem::set_initial_pose()
   for (auto &joint_state : joint_states_)
   {
     mj_data_->qpos[joint_state.mj_pos_adr] = joint_state.position;
+  }
+  mj_forward(mj_model_, mj_data_);
+  update_body_state_data();
+}
+
+void MujocoSystem::update_body_state_data()
+{
+  // Pose is world-aligned. Twist is expressed in the body-local frame,
+  // matching the ground-truth odometry topic.
+  for (auto &data : body_state_data_)
+  {
+    if (data.mj_body_id < 0)
+    {
+      continue;
+    }
+
+    const int body_id = data.mj_body_id;
+    data.position.x() = mj_data_->xpos[3 * body_id + 0];
+    data.position.y() = mj_data_->xpos[3 * body_id + 1];
+    data.position.z() = mj_data_->xpos[3 * body_id + 2];
+
+    data.orientation.w() = mj_data_->xquat[4 * body_id + 0];
+    data.orientation.x() = mj_data_->xquat[4 * body_id + 1];
+    data.orientation.y() = mj_data_->xquat[4 * body_id + 2];
+    data.orientation.z() = mj_data_->xquat[4 * body_id + 3];
+    data.orientation.normalize();
+
+    mjtNum vel6[6] = {0};
+    mj_objectVelocity(mj_model_, mj_data_, mjOBJ_BODY, body_id, vel6, /*flg_local=*/1);
+    data.angular_velocity.x() = vel6[0];
+    data.angular_velocity.y() = vel6[1];
+    data.angular_velocity.z() = vel6[2];
+    data.linear_velocity.x() = vel6[3];
+    data.linear_velocity.y() = vel6[4];
+    data.linear_velocity.z() = vel6[5];
   }
 }
 

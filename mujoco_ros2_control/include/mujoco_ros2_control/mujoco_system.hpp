@@ -107,12 +107,24 @@ public:
     SensorData<Eigen::Vector3d> linear_acceleration;
   };
 
+  struct BodyStateData
+  {
+    std::string name;
+    std::string body_name;
+    int mj_body_id{-1};
+    Eigen::Vector3d position{Eigen::Vector3d::Zero()};
+    Eigen::Quaterniond orientation{Eigen::Quaterniond::Identity()};
+    Eigen::Vector3d linear_velocity{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d angular_velocity{Eigen::Vector3d::Zero()};
+  };
+
 private:
   void register_joints(
     const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info);
   void register_sensors(
     const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info);
   void set_initial_pose();
+  void update_body_state_data();
   void get_joint_limits(
     urdf::JointConstSharedPtr urdf_joint, joint_limits::JointLimits &joint_limits);
   control_toolbox::Pid get_pid_gains(
@@ -125,6 +137,7 @@ private:
   std::vector<JointState> joint_states_;
   std::vector<FTSensorData> ft_sensor_data_;
   std::vector<IMUSensorData> imu_sensor_data_;
+  std::vector<BodyStateData> body_state_data_;
 
   mjModel *mj_model_;
   mjData *mj_data_;
