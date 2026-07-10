@@ -155,6 +155,29 @@ hardware_interface::return_type MujocoSystem::write(
   // Joint states
   for (auto &joint_state : joint_states_)
   {
+    if (joint_state.is_effort_pd_enabled)
+    {
+      // PD + feedforward evaluated against the live state every physics step.
+      double tau =
+        joint_state.pd_kp * (joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr]) +
+        joint_state.pd_kd * (joint_state.velocity_command - mj_data_->qvel[joint_state.mj_vel_adr]) +
+        joint_state.effort_command;
+      const double max_eff = joint_state.joint_limits.has_effort_limits
+                               ? joint_state.joint_limits.max_effort
+                               : std::numeric_limits<double>::max();
+      tau = clamp(std::isfinite(tau) ? tau : 0.0, -max_eff, max_eff);
+      if (use_actuator_effort_command_ && joint_state.mj_actuator_id >= 0)
+      {
+        mj_data_->ctrl[joint_state.mj_actuator_id] = tau;
+        mj_data_->qfrc_applied[joint_state.mj_vel_adr] = 0.0;
+      }
+      else
+      {
+        mj_data_->qfrc_applied[joint_state.mj_vel_adr] = tau;
+      }
+      continue;
+    }
+
     if (joint_state.is_position_control_enabled)
     {
       if (joint_state.is_pid_enabled)
@@ -412,6 +435,25 @@ void MujocoSystem::register_joints(
     {
       last_joint_state.position_pid = get_pid_gains(joint, hardware_interface::HW_IF_POSITION);
       last_joint_state.velocity_pid = get_pid_gains(joint, hardware_interface::HW_IF_VELOCITY);
+    }
+
+    // effort_pd joint action mode: position/velocity/effort commands feed a PD + feedforward
+    // servo evaluated every physics step against the live MuJoCo state (legacy humanoid MPC
+    // actuator emulation). Marked explicitly so plain effort/position joints are unaffected.
+    const auto effort_pd_it = joint.parameters.find("effort_pd");
+    if (effort_pd_it != joint.parameters.end() && effort_pd_it->second == "true")
+    {
+      last_joint_state.is_effort_pd_enabled = true;
+      last_joint_state.is_position_control_enabled = false;
+      last_joint_state.is_velocity_control_enabled = false;
+      last_joint_state.is_effort_control_enabled = false;
+      const auto kp_it = joint.parameters.find("effort_pd_kp");
+      const auto kd_it = joint.parameters.find("effort_pd_kd");
+      last_joint_state.pd_kp = kp_it != joint.parameters.end() ? std::stod(kp_it->second) : 0.0;
+      last_joint_state.pd_kd = kd_it != joint.parameters.end() ? std::stod(kd_it->second) : 0.0;
+      last_joint_state.position_command = last_joint_state.position;
+      last_joint_state.velocity_command = 0.0;
+      last_joint_state.effort_command = 0.0;
     }
   }
 }

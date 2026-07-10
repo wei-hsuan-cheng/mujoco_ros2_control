@@ -75,6 +75,10 @@ public:
     bool is_velocity_control_enabled{false};
     bool is_effort_control_enabled{false};
     bool is_pid_enabled{false};
+    // effort_pd: per-physics-step joint servo tau = pd_kp*(q_des-q) + pd_kd*(qd_des-qd) + effort_command
+    bool is_effort_pd_enabled{false};
+    double pd_kp{0.0};
+    double pd_kd{0.0};
     joint_limits::JointLimits joint_limits;
     bool is_mimic{false};
     int mimicked_joint_index;
