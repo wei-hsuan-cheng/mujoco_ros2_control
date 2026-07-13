@@ -162,10 +162,7 @@ hardware_interface::return_type MujocoSystem::write(
         joint_state.pd_kp * (joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr]) +
         joint_state.pd_kd * (joint_state.velocity_command - mj_data_->qvel[joint_state.mj_vel_adr]) +
         joint_state.effort_command;
-      const double max_eff = joint_state.joint_limits.has_effort_limits
-                               ? joint_state.joint_limits.max_effort
-                               : std::numeric_limits<double>::max();
-      tau = clamp(std::isfinite(tau) ? tau : 0.0, -max_eff, max_eff);
+      tau = std::isfinite(tau) ? tau : 0.0;
       if (use_actuator_effort_command_ && joint_state.mj_actuator_id >= 0)
       {
         mj_data_->ctrl[joint_state.mj_actuator_id] = tau;
