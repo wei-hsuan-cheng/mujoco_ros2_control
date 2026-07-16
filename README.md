@@ -25,28 +25,29 @@ Before build this package configure environment variable for mujoco directory.
 ```bash
 git clone https://github.com/wei-hsuan-cheng/mujoco_ros2_control.git
 
-cd <your_path>
+cd <any_path>
 # Check x86_64 or aarch64
 wget -O mujoco-3.3.7-linux-x86_64.tar.gz \
   https://github.com/google-deepmind/mujoco/releases/download/3.3.7/mujoco-3.3.7-linux-x86_64.tar.gz && \
 tar -xzf mujoco-3.3.7-linux-x86_64.tar.gz
-export MUJOCO_DIR=<your_path>/mujoco-3.x.x # e.g. mujoco-3.3.7 (depends on your own version)
+export MUJOCO_DIR=<any_path>/mujoco-3.x.x # e.g. mujoco-3.3.7 (depends on your own version)
 ```
 
 You can now compile the package using the following commands.
 
 ```bash
-cd mujoco_ros2_control
+cd <workspace_dir>
 source /opt/ros/${ROS_DISTRO}/setup.bash
-export CMAKE_BUILD_PARALLEL_LEVEL=2 && \
-export MAKEFLAGS=-j2 && \
-export NINJAFLAGS=-j2 && \
-colcon build --symlink-install \
-  --packages-up-to mujoco_ros2_control mujoco_ros2_control_demos \
-  --executor sequential --parallel-workers 2 \
-  --cmake-force-configure \
-  --cmake-args -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release && \
-  . install/setup.bash
+NUM_JOBS=2 && \
+  export CMAKE_BUILD_PARALLEL_LEVEL=${NUM_JOBS} && \
+  export MAKEFLAGS=-j${NUM_JOBS} && \
+  export NINJAFLAGS=-j${NUM_JOBS} && \
+  colcon build --symlink-install \
+    --packages-up-to mujoco_ros2_control mujoco_ros2_control_demos \
+    --executor sequential --parallel-workers ${NUM_JOBS} \
+    --cmake-force-configure \
+    --cmake-args -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release && \
+    . install/setup.bash
 ```
 
 Run demos:
