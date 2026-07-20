@@ -54,6 +54,21 @@ set(THIS_PACKAGE_DEPENDS
 )
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
+# MuJoCo resolution order:
+#   1. a source-installed mujoco (find_package)
+#   2. a prebuilt tree pointed to by the MUJOCO_DIR environment variable
+#   3. automatic download of the prebuilt release into <pkg>/lib/ (Linux only);
+#      the download is cached there, so it only happens once per version.
+set(MUJOCO_VERSION "3.3.7" CACHE STRING
+  "MuJoCo prebuilt release downloaded automatically when no other install is found")
+
+# find_library caches its result: drop a cached path whose file no longer exists
+# (e.g. a removed MUJOCO_DIR tree) so resolution below runs again.
+if(MUJOCO_LIB AND NOT EXISTS ${MUJOCO_LIB})
+  message(STATUS "Cached mujoco library ${MUJOCO_LIB} no longer exists; re-resolving.")
+  unset(MUJOCO_LIB CACHE)
+endif()
+
 find_package(mujoco QUIET)
 if(mujoco_FOUND)
   message(STATUS "Mujoco build from source has been found")
@@ -67,8 +82,55 @@ elseif(DEFINED ENV{MUJOCO_DIR})
   endif()
   set(MUJOCO_INCLUDE_DIR $ENV{MUJOCO_DIR}/include)
 else()
-  message(FATAL_ERROR "Failed to find mujoco with find_package.
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    set(MUJOCO_ARCH "aarch64")
+  else()
+    set(MUJOCO_ARCH "x86_64")
+  endif()
+  # Arch-specific cache folder: the source tree may be shared across machines
+  # (e.g. a macOS folder mounted into Linux containers of different arch).
+  set(MUJOCO_DOWNLOAD_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/lib/linux-${MUJOCO_ARCH})
+  set(MUJOCO_LOCAL_DIR ${MUJOCO_DOWNLOAD_ROOT}/mujoco-${MUJOCO_VERSION})
+
+  if(NOT EXISTS ${MUJOCO_LOCAL_DIR}/lib)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      message(FATAL_ERROR "No mujoco install found and the automatic prebuilt download only supports Linux.
   Either build and install mujoco from source or set the MUJOCO_DIR environment variable to tell CMake where to find the binary install. ")
+    endif()
+    set(MUJOCO_TARBALL mujoco-${MUJOCO_VERSION}-linux-${MUJOCO_ARCH}.tar.gz)
+    set(MUJOCO_URL https://github.com/google-deepmind/mujoco/releases/download/${MUJOCO_VERSION}/${MUJOCO_TARBALL})
+
+    message(STATUS "Mujoco not found; downloading prebuilt ${MUJOCO_URL} into ${MUJOCO_DOWNLOAD_ROOT}")
+    file(MAKE_DIRECTORY ${MUJOCO_DOWNLOAD_ROOT})
+    file(DOWNLOAD ${MUJOCO_URL} ${MUJOCO_DOWNLOAD_ROOT}/${MUJOCO_TARBALL}
+      SHOW_PROGRESS STATUS MUJOCO_DOWNLOAD_STATUS)
+    list(GET MUJOCO_DOWNLOAD_STATUS 0 MUJOCO_DOWNLOAD_CODE)
+    if(NOT MUJOCO_DOWNLOAD_CODE EQUAL 0)
+      list(GET MUJOCO_DOWNLOAD_STATUS 1 MUJOCO_DOWNLOAD_ERROR)
+      file(REMOVE ${MUJOCO_DOWNLOAD_ROOT}/${MUJOCO_TARBALL})
+      message(FATAL_ERROR "Mujoco download failed: ${MUJOCO_DOWNLOAD_ERROR}
+  Download it manually and set the MUJOCO_DIR environment variable instead.")
+    endif()
+
+    # The tarball extracts to mujoco-${MUJOCO_VERSION}/; cmake -E tar works on all CMake versions.
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar xzf ${MUJOCO_DOWNLOAD_ROOT}/${MUJOCO_TARBALL}
+      WORKING_DIRECTORY ${MUJOCO_DOWNLOAD_ROOT}
+      RESULT_VARIABLE MUJOCO_EXTRACT_CODE)
+    file(REMOVE ${MUJOCO_DOWNLOAD_ROOT}/${MUJOCO_TARBALL})
+    if(NOT MUJOCO_EXTRACT_CODE EQUAL 0)
+      message(FATAL_ERROR "Failed to extract ${MUJOCO_TARBALL}")
+    endif()
+  else()
+    message(STATUS "Using cached mujoco prebuilt at ${MUJOCO_LOCAL_DIR}")
+  endif()
+
+  find_library(MUJOCO_LIB mujoco HINTS ${MUJOCO_LOCAL_DIR}/lib)
+  if(NOT MUJOCO_LIB)
+    message(FATAL_ERROR "Downloaded mujoco at ${MUJOCO_LOCAL_DIR} is missing its library.
+  Delete that folder to retry the download, or set the MUJOCO_DIR environment variable.")
+  endif()
+  set(MUJOCO_INCLUDE_DIR ${MUJOCO_LOCAL_DIR}/include)
 endif()
 
 add_library(mujoco_system_plugins SHARED src/mujoco_system.cpp)

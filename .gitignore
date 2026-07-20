@@ -9,3 +9,6 @@ log/
 
 # mujoco log
 **/MUJOCO_LOG.TXT
+
+# auto-downloaded mujoco prebuilt (CMake fallback)
+mujoco_ros2_control/lib/

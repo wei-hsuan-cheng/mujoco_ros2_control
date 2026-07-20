@@ -20,22 +20,9 @@ Make sure you have the following software installed if you are running on the lo
 
 ### Package Install
 
-Before build this package configure environment variable for mujoco directory.
-
 ```bash
 git clone https://github.com/wei-hsuan-cheng/mujoco_ros2_control.git
 
-cd <any_path>
-# Check x86_64 or aarch64
-wget -O mujoco-3.3.7-linux-x86_64.tar.gz \
-  https://github.com/google-deepmind/mujoco/releases/download/3.3.7/mujoco-3.3.7-linux-x86_64.tar.gz && \
-tar -xzf mujoco-3.3.7-linux-x86_64.tar.gz
-export MUJOCO_DIR=<any_path>/mujoco-3.x.x # e.g. mujoco-3.3.7 (depends on your own version)
-```
-
-You can now compile the package using the following commands.
-
-```bash
 cd <workspace_dir>
 source /opt/ros/${ROS_DISTRO}/setup.bash
 NUM_JOBS=2 && \
@@ -48,6 +35,18 @@ NUM_JOBS=2 && \
     --cmake-force-configure \
     --cmake-args -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release && \
     . install/setup.bash
+```
+
+(Optional)To pin a different prebuilt version pass `-DMUJOCO_VERSION=3.x.x` in `--cmake-args`, or keep using your own install by exporting `MUJOCO_DIR`:
+
+```bash
+# optional: only when you want to manage the mujoco prebuilt yourself
+cd <any_path>
+# Check x86_64 or aarch64
+wget -O mujoco-3.3.7-linux-x86_64.tar.gz \
+  https://github.com/google-deepmind/mujoco/releases/download/3.3.7/mujoco-3.3.7-linux-x86_64.tar.gz && \
+tar -xzf mujoco-3.3.7-linux-x86_64.tar.gz
+export MUJOCO_DIR=<any_path>/mujoco-3.x.x # e.g. mujoco-3.3.7 (depends on your own version)
 ```
 
 Run demos:
