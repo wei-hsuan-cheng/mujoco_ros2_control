@@ -12,11 +12,7 @@ Follow these steps to install and run the project locally.
 
 ### Prerequisites
 
-Make sure you have the following software installed if you are running on the local machine:
-
-- [ROS 2](https://docs.ros.org/en/humble/Installation.html)
-- [Mujoco](https://mujoco.org/)
-  - Recommended to install the pre-built libraries [here](https://github.com/google-deepmind/mujoco/releases) (following the [doc](https://mujoco.readthedocs.io/en/latest/programming/#)).
+Make sure you have [ROS 2](https://docs.ros.org/en/humble/Installation.html) installed.
 
 ### Package Install
 
@@ -37,7 +33,7 @@ NUM_JOBS=2 && \
     . install/setup.bash
 ```
 
-(Optional)To pin a different prebuilt version pass `-DMUJOCO_VERSION=3.x.x` in `--cmake-args`, or keep using your own install by exporting `MUJOCO_DIR`:
+(Optional) To pin a different prebuilt version pass `-DMUJOCO_VERSION=3.x.x` in `--cmake-args`, or keep using your own install by exporting `MUJOCO_DIR`:
 
 ```bash
 # optional: only when you want to manage the mujoco prebuilt yourself
