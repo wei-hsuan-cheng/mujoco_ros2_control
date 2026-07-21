@@ -57,8 +57,10 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 # MuJoCo resolution order:
 #   1. a source-installed mujoco (find_package)
 #   2. a prebuilt tree pointed to by the MUJOCO_DIR environment variable
-#   3. automatic download of the prebuilt release into <pkg>/lib/ (Linux only);
-#      the download is cached there, so it only happens once per version.
+#   3. automatic download of the prebuilt release (Linux only) into the build
+#      directory, or MUJOCO_CACHE_DIR if set; cached so it downloads once per
+#      version. Kept out of the (possibly read-only) source tree so the first
+#      colcon build works on host and inside containers alike.
 set(MUJOCO_VERSION "3.3.7" CACHE STRING
   "MuJoCo prebuilt release downloaded automatically when no other install is found")
 
@@ -87,9 +89,22 @@ else()
   else()
     set(MUJOCO_ARCH "x86_64")
   endif()
-  # Arch-specific cache folder: the source tree may be shared across machines
-  # (e.g. a macOS folder mounted into Linux containers of different arch).
-  set(MUJOCO_DOWNLOAD_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/lib/linux-${MUJOCO_ARCH})
+  # Download the prebuilt into a *writable* cache instead of the source tree.
+  # The source tree is often read-only for the build user (e.g. a host folder
+  # owned by one UID mounted into a container whose user has a different UID),
+  # which made the automatic download fail at file(MAKE_DIRECTORY). The build
+  # directory is always owned by whoever runs `colcon build`, so the first-build
+  # auto-download works everywhere (host or container) with no manual step.
+  #
+  # MUJOCO_CACHE_DIR (env) overrides the location if you want a persistent,
+  # cross-build cache (e.g. $HOME/.cache/mujoco) that survives `colcon build`
+  # cleans. The path is arch-specific because the same cache may be shared
+  # across machines of different architectures.
+  if(DEFINED ENV{MUJOCO_CACHE_DIR})
+    set(MUJOCO_DOWNLOAD_ROOT $ENV{MUJOCO_CACHE_DIR}/linux-${MUJOCO_ARCH})
+  else()
+    set(MUJOCO_DOWNLOAD_ROOT ${CMAKE_CURRENT_BINARY_DIR}/mujoco/linux-${MUJOCO_ARCH})
+  endif()
   set(MUJOCO_LOCAL_DIR ${MUJOCO_DOWNLOAD_ROOT}/mujoco-${MUJOCO_VERSION})
 
   if(NOT EXISTS ${MUJOCO_LOCAL_DIR}/lib)
