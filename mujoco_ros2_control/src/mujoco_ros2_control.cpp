@@ -26,6 +26,7 @@
 #include <cctype>
 #include <cmath>
 #include <functional>
+#include <sstream>
 #include <utility>
 
 #include "mujoco_ros2_control/mujoco_ros2_control.hpp"
@@ -208,6 +209,7 @@ void MujocoRos2Control::init()
   cm_thread_ = std::thread(spin);
 
   init_ground_truth();
+  init_object_reset();
 }
 
 void MujocoRos2Control::update()
@@ -226,6 +228,11 @@ void MujocoRos2Control::update()
   {
     publish_ground_truth(sim_time_ros);
   }
+
+  // Teleport requested bodies before mj_step1 so kinematics, collisions and constraints are all
+  // recomputed from the restored pose. Applying them after mj_step1 would let mj_step2 integrate
+  // contact data belonging to the pose the object just left.
+  apply_object_resets();
 
   mj_step1(mj_model_, mj_data_);
 
@@ -621,6 +628,123 @@ void MujocoRos2Control::apply_external_wrenches()
       publish_external_wrench_visualization(it->second.body_name, body_wrench);
     }
     ++it;
+  }
+}
+
+void MujocoRos2Control::init_object_reset()
+{
+  reset_objects_srv_ = node_->create_service<diagnostic_msgs::srv::AddDiagnostics>(
+    "~/reset_objects",
+    std::bind(
+      &MujocoRos2Control::object_reset_callback, this, std::placeholders::_1,
+      std::placeholders::_2));
+
+  RCLCPP_INFO_STREAM(
+    logger_,
+    "Object reset service ready on ~/reset_objects; pass free body names in load_namespace as a "
+    "comma-separated list, e.g. \"box_1,box_2\".");
+}
+
+// Names are validated here, on the service thread, so a caller learns immediately that a body is
+// unknown or not free-floating. Only body ids reach the physics thread.
+void MujocoRos2Control::object_reset_callback(
+  const std::shared_ptr<diagnostic_msgs::srv::AddDiagnostics::Request> request,
+  std::shared_ptr<diagnostic_msgs::srv::AddDiagnostics::Response> response)
+{
+  std::vector<int> body_ids;
+  std::vector<std::string> accepted;
+  std::vector<std::string> rejected;
+
+  std::stringstream names(request->load_namespace);
+  std::string name;
+  while (std::getline(names, name, ','))
+  {
+    const auto first = name.find_first_not_of(" \t\n\r");
+    if (first == std::string::npos) continue;
+    const auto last = name.find_last_not_of(" \t\n\r");
+    name = name.substr(first, last - first + 1);
+
+    const int body_id = mj_name2id(mj_model_, mjOBJ_BODY, name.c_str());
+    if (body_id < 0)
+    {
+      rejected.push_back(name + " (no such body)");
+      continue;
+    }
+
+    // Restoring qpos only makes sense for a body that owns a free joint. Refusing anything else
+    // keeps a mistyped name from teleporting part of the robot.
+    const int joint_id = mj_model_->body_jntadr[body_id];
+    if (
+      mj_model_->body_jntnum[body_id] != 1 || joint_id < 0 ||
+      mj_model_->jnt_type[joint_id] != mjJNT_FREE)
+    {
+      rejected.push_back(name + " (not a free body)");
+      continue;
+    }
+
+    body_ids.push_back(body_id);
+    accepted.push_back(name);
+  }
+
+  if (accepted.empty() && rejected.empty())
+  {
+    response->success = false;
+    response->message = "No body names given; set load_namespace to e.g. \"box_1,box_2\".";
+    return;
+  }
+
+  if (!body_ids.empty())
+  {
+    std::lock_guard<std::mutex> lock(object_reset_mutex_);
+    pending_object_resets_.insert(pending_object_resets_.end(), body_ids.begin(), body_ids.end());
+  }
+
+  std::stringstream message;
+  message << "queued for reset: ";
+  for (size_t i = 0; i < accepted.size(); ++i)
+  {
+    message << (i ? ", " : "") << accepted[i];
+  }
+  if (accepted.empty()) message << "(none)";
+  if (!rejected.empty())
+  {
+    message << "; rejected: ";
+    for (size_t i = 0; i < rejected.size(); ++i)
+    {
+      message << (i ? ", " : "") << rejected[i];
+    }
+  }
+
+  response->success = rejected.empty();
+  response->message = message.str();
+}
+
+// Runs on the physics thread. qpos0 holds the configuration the model was compiled with, so it is
+// the pose each body had on the first launch - no snapshot needed.
+void MujocoRos2Control::apply_object_resets()
+{
+  std::vector<int> body_ids;
+  {
+    std::lock_guard<std::mutex> lock(object_reset_mutex_);
+    if (pending_object_resets_.empty()) return;
+    body_ids.swap(pending_object_resets_);
+  }
+
+  for (const int body_id : body_ids)
+  {
+    const int joint_id = mj_model_->body_jntadr[body_id];
+    const int qpos_adr = mj_model_->jnt_qposadr[joint_id];
+    const int dof_adr = mj_model_->jnt_dofadr[joint_id];
+
+    // A free joint spans 7 qpos (position then wxyz quaternion) and 6 qvel.
+    std::copy_n(mj_model_->qpos0 + qpos_adr, 7, mj_data_->qpos + qpos_adr);
+    std::fill_n(mj_data_->qvel + dof_adr, 6, static_cast<mjtNum>(0));
+    std::fill_n(mj_data_->qacc + dof_adr, 6, static_cast<mjtNum>(0));
+    std::fill_n(mj_data_->xfrc_applied + 6 * body_id, 6, static_cast<mjtNum>(0));
+
+    RCLCPP_INFO_STREAM(
+      logger_,
+      "Reset body '" << mj_id2name(mj_model_, mjOBJ_BODY, body_id) << "' to its initial pose.");
   }
 }
 

@@ -23,6 +23,7 @@ find_package(glfw3 REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(control_toolbox REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -47,6 +48,7 @@ set(THIS_PACKAGE_DEPENDS
   glfw3
   control_toolbox
   std_srvs
+  diagnostic_msgs
   tf2_ros
   geometry_msgs
   std_msgs

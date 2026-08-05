@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "controller_manager/controller_manager.hpp"
+#include "diagnostic_msgs/srv/add_diagnostics.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/wrench_stamped.hpp"
 #include "mujoco_ros2_control/msg/mujoco_external_wrench.hpp"
@@ -94,6 +95,11 @@ private:
     const std::string &body_name,
     const std::array<mjtNum, 6> &body_wrench);
   void apply_external_wrenches();
+  void init_object_reset();
+  void object_reset_callback(
+    const std::shared_ptr<diagnostic_msgs::srv::AddDiagnostics::Request> request,
+    std::shared_ptr<diagnostic_msgs::srv::AddDiagnostics::Response> response);
+  void apply_object_resets();
   void init_ground_truth();
   void publish_ground_truth(const rclcpp::Time &stamp);
   std::string get_robot_description();
@@ -126,6 +132,11 @@ private:
   std::mutex external_wrench_mutex_;
   std::vector<PendingExternalWrench> pending_external_wrenches_;
   std::unordered_map<int, ActiveExternalWrench> active_external_wrenches_;
+
+  // Free bodies queued by ~/reset_objects, applied by the physics thread in update().
+  rclcpp::Service<diagnostic_msgs::srv::AddDiagnostics>::SharedPtr reset_objects_srv_;
+  std::mutex object_reset_mutex_;
+  std::vector<int> pending_object_resets_;
 
   bool gt_enabled_{false};
   bool gt_publish_tf_{false};
