@@ -310,14 +310,14 @@ void MujocoRendering::mouse_move_callback_impl(GLFWwindow *window, double xpos, 
   }
 
   // move camera
-  mjv_moveCamera(mj_model_, action, dx / height, dy / height, &mjv_scn_, &mjv_cam_);
+  mjv_moveCamera(mj_model_, action, dx / height, dy / height, &mjv_cam_);
 }
 
 void MujocoRendering::scroll_callback_impl(
   GLFWwindow * /* window */, double /* xoffset */, double yoffset)
 {
   // emulate vertical mouse motion = 5% of window height
-  mjv_moveCamera(mj_model_, mjMOUSE_ZOOM, 0, -0.05 * yoffset, &mjv_scn_, &mjv_cam_);
+  mjv_moveCamera(mj_model_, mjMOUSE_ZOOM, 0, -0.05 * yoffset, &mjv_cam_);
 }
 
 }  // namespace mujoco_ros2_control

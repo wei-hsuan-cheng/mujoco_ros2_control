@@ -33,17 +33,7 @@ NUM_JOBS=2 && \
     . install/setup.bash
 ```
 
-(Optional) To pin a different prebuilt version pass `-DMUJOCO_VERSION=3.x.x` in `--cmake-args`, or keep using your own install by exporting `MUJOCO_DIR`:
-
-```bash
-# optional: only when you want to manage the mujoco prebuilt yourself
-cd <any_path>
-# Check x86_64 or aarch64
-wget -O mujoco-3.3.7-linux-x86_64.tar.gz \
-  https://github.com/google-deepmind/mujoco/releases/download/3.3.7/mujoco-3.3.7-linux-x86_64.tar.gz && \
-tar -xzf mujoco-3.3.7-linux-x86_64.tar.gz
-export MUJOCO_DIR=<any_path>/mujoco-3.x.x # e.g. mujoco-3.3.7 (depends on your own version)
-```
+(Optional) To pin a different prebuilt version pass `-DMUJOCO_VERSION=3.x.x` in `--cmake-args` (**3.11.0 or newer**; `mjv_moveCamera` changed signature in 3.11.0).
 
 Run demos:
 
@@ -74,8 +64,8 @@ ros2 run mujoco_ros2_control_demos example_diff_drive
   ```bash
   # Terminal command
   ldd install/mujoco_ros2_control/lib/mujoco_ros2_control/mujoco_ros2_control | grep mujoco
-  # It should returns this (e.g., for mujoco-3.3.7)
-  libmujoco.so.3.3.7 => <your_mujoco_path>/mujoco-3.3.7/lib/libmujoco.so.3.3.7 (0x0000709b0f376000)
+  # It should returns this (e.g., for mujoco-3.13.0)
+  libmujoco.so.3.13.0 => <your_mujoco_path>/mujoco-3.13.0/lib/libmujoco.so.3.13.0 (0x0000709b0f376000)
   ```
 
 ## Usage

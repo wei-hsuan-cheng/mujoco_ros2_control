@@ -63,13 +63,19 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 #      directory, or MUJOCO_CACHE_DIR if set; cached so it downloads once per
 #      version. Kept out of the (possibly read-only) source tree so the first
 #      colcon build works on host and inside containers alike.
-set(MUJOCO_VERSION "3.3.7" CACHE STRING
+set(MUJOCO_VERSION "3.13.0" CACHE STRING
   "MuJoCo prebuilt release downloaded automatically when no other install is found")
 
 # find_library caches its result: drop a cached path whose file no longer exists
 # (e.g. a removed MUJOCO_DIR tree) so resolution below runs again.
 if(MUJOCO_LIB AND NOT EXISTS ${MUJOCO_LIB})
   message(STATUS "Cached mujoco library ${MUJOCO_LIB} no longer exists; re-resolving.")
+  unset(MUJOCO_LIB CACHE)
+endif()
+
+# MUJOCO_LIB is cached and the old mujoco-<version>/lib still exists, so without
+# this a changed MUJOCO_VERSION would silently keep linking the old library.
+if(MUJOCO_LIB AND NOT "${MUJOCO_RESOLVED_VERSION}" STREQUAL "${MUJOCO_VERSION}")
   unset(MUJOCO_LIB CACHE)
 endif()
 
@@ -149,6 +155,9 @@ else()
   endif()
   set(MUJOCO_INCLUDE_DIR ${MUJOCO_LOCAL_DIR}/include)
 endif()
+
+message(STATUS "Using mujoco: ${MUJOCO_LIB}")
+set(MUJOCO_RESOLVED_VERSION ${MUJOCO_VERSION} CACHE INTERNAL "")
 
 add_library(mujoco_system_plugins SHARED src/mujoco_system.cpp)
 ament_target_dependencies(mujoco_system_plugins ${THIS_PACKAGE_DEPENDS})
