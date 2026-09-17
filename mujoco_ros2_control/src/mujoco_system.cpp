@@ -22,6 +22,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
+#include <memory>
+
+#include "ament_index_cpp/get_package_share_directory.hpp"
 
 namespace mujoco_ros2_control
 {
@@ -33,6 +37,9 @@ constexpr char PARAM_MUJOCO_QUAT_SENSOR_NAME[] = "mujoco_quat_sensor_name";
 constexpr char PARAM_MUJOCO_GYRO_SENSOR_NAME[] = "mujoco_gyro_sensor_name";
 constexpr char PARAM_MUJOCO_ACCEL_SENSOR_NAME[] = "mujoco_accel_sensor_name";
 constexpr char PARAM_MUJOCO_BODY_NAME[] = "mujoco_body_name";
+constexpr char PARAM_MUJOCO_SITE_NAME[] = "mujoco_site_name";
+constexpr char PARAM_LIDAR_SCAN_PATTERN[] = "scan_pattern";
+constexpr char PARAM_LIDAR_SCAN_PATTERN_FILE[] = "scan_pattern_file";
 
 std::string strip_suffix_after_last_underscore(const std::string &name)
 {
@@ -129,6 +136,13 @@ hardware_interface::return_type MujocoSystem::read(
   }
 
   update_body_state_data();
+
+  // Lidar last: it casts against the current kinematics, which mj_step1 has already
+  // computed for this step.
+  for (auto &lidar : lidars_)
+  {
+    lidar->update(mj_model_, mj_data_);
+  }
 
   return hardware_interface::return_type::OK;
 }
@@ -455,6 +469,132 @@ void MujocoSystem::register_joints(
   }
 }
 
+bool MujocoSystem::register_lidar(const hardware_interface::ComponentInfo &sensor)
+{
+  const auto fail = [this, &sensor](const std::string &why)
+  {
+    RCLCPP_ERROR_STREAM(logger_, "Lidar sensor '" << sensor.name << "' not registered: " << why);
+    return false;
+  };
+  const auto param = [&sensor](const std::string &key, const std::string &fallback)
+  { return get_sensor_param_or_default(sensor, key, fallback); };
+
+  LidarConfig config;
+  config.name = sensor.name;
+  config.site_name =
+    param(PARAM_MUJOCO_SITE_NAME, strip_suffix_after_last_underscore(sensor.name));
+  config.frame_id = param("frame_id", config.site_name);
+  config.topic = param("topic", sensor.name + "/points");
+
+  // An explicit file wins; otherwise a named pattern shipped with this package.
+  if (has_sensor_param(sensor, PARAM_LIDAR_SCAN_PATTERN_FILE))
+  {
+    config.pattern_file = sensor.parameters.at(PARAM_LIDAR_SCAN_PATTERN_FILE);
+  }
+  else
+  {
+    const std::string pattern = param(PARAM_LIDAR_SCAN_PATTERN, "mid360");
+    try
+    {
+      config.pattern_file = ament_index_cpp::get_package_share_directory("mujoco_ros2_control") +
+                            "/lidar_patterns/" + pattern + ".npy";
+    }
+    catch (const std::exception &e)
+    {
+      return fail(std::string("cannot locate the mujoco_ros2_control share directory: ") + e.what());
+    }
+  }
+
+  // Defaults are the Livox Mid-360's: 200k points/s at 10 Hz, 0.1-40 m.
+  try
+  {
+    config.frame_rate = std::stod(param("frame_rate", "10.0"));
+    config.points_per_frame = std::stoi(param("points_per_frame", "20000"));
+    config.min_range = std::stod(param("min_range", "0.1"));
+    config.max_range = std::stod(param("max_range", "40.0"));
+    config.range_noise_stddev = std::stod(param("range_noise_stddev", "0.0"));
+    config.seed = static_cast<unsigned int>(std::stoul(param("seed", "0")));
+    config.intensity = std::stof(param("intensity", "100.0"));
+    config.state_sectors = std::stoi(param("state_sectors", "0"));
+  }
+  catch (const std::exception &)
+  {
+    return fail("a numeric parameter could not be parsed");
+  }
+  const std::string filter = lower_copy(param("filter_robot_hits", "true"));
+  if (filter != "true" && filter != "false" && filter != "1" && filter != "0")
+  {
+    return fail("filter_robot_hits must be true or false, got '" + filter + "'");
+  }
+  config.filter_robot_hits = (filter == "true" || filter == "1");
+
+  auto lidar = std::make_unique<MujocoLidar>(config);
+  std::string error;
+  if (!lidar->init(mj_model_, error))
+  {
+    return fail(error);
+  }
+
+  auto &state = lidar->state();
+  static const std::string kSectorPrefix = "sector_";
+  static const std::string kSectorSuffix = ".min_range";
+  for (const auto &state_if : sensor.state_interfaces)
+  {
+    const std::string &name = state_if.name;
+    if (name == "frame_count")
+    {
+      state_interfaces_.emplace_back(sensor.name, name, &state.frame_count);
+    }
+    else if (name == "stamp")
+    {
+      state_interfaces_.emplace_back(sensor.name, name, &state.stamp);
+    }
+    else if (name == "num_points")
+    {
+      state_interfaces_.emplace_back(sensor.name, name, &state.num_points);
+    }
+    else if (name == "min_range")
+    {
+      state_interfaces_.emplace_back(sensor.name, name, &state.min_range);
+    }
+    else if (
+      name.size() > kSectorPrefix.size() + kSectorSuffix.size() &&
+      name.compare(0, kSectorPrefix.size(), kSectorPrefix) == 0 &&
+      name.compare(name.size() - kSectorSuffix.size(), kSectorSuffix.size(), kSectorSuffix) == 0)
+    {
+      const std::string index = name.substr(
+        kSectorPrefix.size(), name.size() - kSectorPrefix.size() - kSectorSuffix.size());
+      size_t sector = std::numeric_limits<size_t>::max();
+      try
+      {
+        sector = std::stoul(index);
+      }
+      catch (const std::exception &)
+      {
+      }
+      if (sector >= state.sector_min_range.size())
+      {
+        RCLCPP_ERROR_STREAM(
+          logger_, "Lidar sensor '" << sensor.name << "': state interface '" << name
+                                    << "' is outside state_sectors = "
+                                    << state.sector_min_range.size());
+        continue;
+      }
+      state_interfaces_.emplace_back(sensor.name, name, &state.sector_min_range[sector]);
+    }
+    else
+    {
+      RCLCPP_WARN_STREAM(
+        logger_, "Lidar sensor '" << sensor.name << "': unknown state interface '" << name
+                                  << "' (expected frame_count, stamp, num_points, min_range, "
+                                     "sector_<i>.min_range)");
+    }
+  }
+
+  lidars_.push_back(std::move(lidar));
+  return true;
+}
+
 void MujocoSystem::register_sensors(
   const urdf::Model & /* urdf_model */, const hardware_interface::HardwareInfo &hardware_info)
 {
@@ -562,6 +702,14 @@ void MujocoSystem::register_sensors(
             sensor.name, state_if.name, &last_sensor_data.angular_velocity.z());
         }
       }
+    }
+
+    else if (
+      has_sensor_param(sensor, PARAM_LIDAR_SCAN_PATTERN) ||
+      has_sensor_param(sensor, PARAM_LIDAR_SCAN_PATTERN_FILE) ||
+      sensor.name.find("_lidar") != std::string::npos)
+    {
+      register_lidar(sensor);
     }
 
     else if (has_explicit_ft_mapping || sensor.name.find("_fts") != std::string::npos)

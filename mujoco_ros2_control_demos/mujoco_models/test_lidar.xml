@@ -1,0 +1,58 @@
+<mujoco model="test_lidar">
+  <!--
+    Standalone 3D lidar demo: a Livox Mid-360 on a mast in a walled room.
+
+    The sensor's housing geom encloses the "mid360" site, the same situation as on
+    the Unitree G1 where the Mid-360 origin sits inside the torso mesh. The mount
+    body is excluded from the ray cast, so the housing does not blank the scan.
+    The rolling ball and the pendulum are there to show the cloud updating live.
+  -->
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+
+  <visual>
+    <global offwidth="1280" offheight="720"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1=".72 .69 .64" rgb2=".68 .65 .6"
+             width="300" height="300"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true"/>
+  </asset>
+
+  <worldbody>
+    <light directional="true" dir="-.4 .3 -1" diffuse=".7 .7 .7"/>
+    <geom name="floor" type="plane" size="0 0 .05" material="grid"/>
+
+    <!-- room: 10 x 8 m, walls 2.5 m high -->
+    <geom name="wall_north" type="box" pos="0 4 1.25" size="5 .1 1.25" rgba=".6 .6 .7 1"/>
+    <geom name="wall_south" type="box" pos="0 -4 1.25" size="5 .1 1.25" rgba=".6 .6 .7 1"/>
+    <geom name="wall_east" type="box" pos="5 0 1.25" size=".1 4 1.25" rgba=".6 .6 .7 1"/>
+    <geom name="wall_west" type="box" pos="-5 0 1.25" size=".1 4 1.25" rgba=".6 .6 .7 1"/>
+
+    <!-- static obstacles -->
+    <geom name="crate" type="box" pos="2 1 .4" size=".4 .4 .4" rgba=".8 .5 .3 1"/>
+    <geom name="pillar" type="cylinder" pos="-2 -1.5 1" size=".25 1" rgba=".4 .6 .8 1"/>
+    <geom name="dome" type="sphere" pos="-1.5 2 .5" size=".5" rgba=".5 .8 .5 1"/>
+    <geom name="ramp" type="box" pos="2.5 -2 .35" euler="0 -.35 0" size="1.2 .6 .05"
+          rgba=".7 .7 .4 1"/>
+
+    <!-- the sensor mast -->
+    <body name="lidar_mast" pos="0 0 0">
+      <geom name="mast_pole" type="cylinder" fromto="0 0 0 0 0 .95" size=".03" rgba=".3 .3 .3 1"/>
+      <body name="lidar_link" pos="0 0 1.0">
+        <geom name="mid360_housing" type="cylinder" size=".05 .03" rgba=".15 .15 .15 1"/>
+        <site name="mid360" pos="0 0 0" size=".01"/>
+      </body>
+    </body>
+
+    <!-- moving things -->
+    <body name="ball" pos="3.4 -2 1.2">
+      <freejoint/>
+      <geom type="sphere" size=".15" rgba=".9 .2 .2 1"/>
+    </body>
+    <body name="pendulum_pivot" pos="-2.5 1 2.2">
+      <joint name="pendulum" type="hinge" axis="1 0 0" damping=".02" ref="-1.0"/>
+      <geom type="capsule" fromto="0 0 0 0 0 -1.4" size=".08" rgba=".8 .8 .2 1"/>
+    </body>
+  </worldbody>
+</mujoco>

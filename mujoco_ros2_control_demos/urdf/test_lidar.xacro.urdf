@@ -1,0 +1,75 @@
+<?xml version="1.0" ?>
+<robot name="lidar_mast" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <link name="world"/>
+
+  <link name="lidar_mast">
+    <visual>
+      <geometry>
+        <cylinder radius="0.03" length="0.95"/>
+      </geometry>
+      <origin xyz="0 0 0.475"/>
+    </visual>
+  </link>
+
+  <link name="lidar_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.05" length="0.06"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <joint name="world_to_mast" type="fixed">
+    <parent link="world"/>
+    <child link="lidar_mast"/>
+  </joint>
+
+  <joint name="mast_to_lidar" type="fixed">
+    <origin xyz="0 0 1.0"/>
+    <parent link="lidar_mast"/>
+    <child link="lidar_link"/>
+  </joint>
+
+  <ros2_control name="MujocoSystem" type="system">
+    <hardware>
+      <plugin>mujoco_ros2_control/MujocoSystem</plugin>
+    </hardware>
+
+    <!--
+      A 3D lidar is declared like the IMU and F/T sensors. It is recognised by a
+      scan_pattern / scan_pattern_file param or a name ending in "_lidar".
+
+      The point cloud is published as sensor_msgs/PointCloud2 in the
+      livox_ros_driver2 layout (x y z intensity tag line timestamp), so software
+      written for a real Livox consumes it unchanged. The state interfaces describe
+      the latest completed frame. Every param below is optional; the values shown
+      are the Livox Mid-360 defaults unless noted.
+    -->
+    <sensor name="mid360_lidar">
+      <state_interface name="frame_count"/>
+      <state_interface name="stamp"/>
+      <state_interface name="num_points"/>
+      <state_interface name="min_range"/>
+      <state_interface name="sector_0.min_range"/>
+      <state_interface name="sector_1.min_range"/>
+      <state_interface name="sector_2.min_range"/>
+      <state_interface name="sector_3.min_range"/>
+      <state_interface name="sector_4.min_range"/>
+      <state_interface name="sector_5.min_range"/>
+      <state_interface name="sector_6.min_range"/>
+      <state_interface name="sector_7.min_range"/>
+
+      <param name="mujoco_site_name">mid360</param>   <!-- default: sensor name minus "_lidar" -->
+      <param name="scan_pattern">mid360</param>        <!-- or scan_pattern_file: path to an (N, 2) .npy -->
+      <param name="frame_id">lidar_link</param>        <!-- default: the site name -->
+      <param name="topic">/livox/lidar</param>         <!-- default: <sensor name>/points -->
+      <param name="frame_rate">10.0</param>
+      <param name="points_per_frame">20000</param>
+      <param name="min_range">0.1</param>
+      <param name="max_range">40.0</param>
+      <param name="range_noise_stddev">0.0</param>     <!-- 0.02 is the Mid-360's spec -->
+      <param name="filter_robot_hits">true</param>
+      <param name="state_sectors">8</param>            <!-- default: 0 -->
+    </sensor>
+  </ros2_control>
+</robot>

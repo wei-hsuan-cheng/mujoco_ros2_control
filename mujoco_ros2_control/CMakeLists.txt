@@ -28,6 +28,8 @@ find_package(tf2_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -53,6 +55,8 @@ set(THIS_PACKAGE_DEPENDS
   geometry_msgs
   std_msgs
   nav_msgs
+  sensor_msgs
+  ament_index_cpp
 )
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
@@ -159,7 +163,7 @@ endif()
 message(STATUS "Using mujoco: ${MUJOCO_LIB}")
 set(MUJOCO_RESOLVED_VERSION ${MUJOCO_VERSION} CACHE INTERNAL "")
 
-add_library(mujoco_system_plugins SHARED src/mujoco_system.cpp)
+add_library(mujoco_system_plugins SHARED src/mujoco_system.cpp src/mujoco_lidar.cpp)
 ament_target_dependencies(mujoco_system_plugins ${THIS_PACKAGE_DEPENDS})
 target_link_libraries(mujoco_system_plugins ${MUJOCO_LIB})
 target_include_directories(mujoco_system_plugins
@@ -168,6 +172,11 @@ target_include_directories(mujoco_system_plugins
     $<INSTALL_INTERFACE:include>
     ${MUJOCO_INCLUDE_DIR}
     ${EIGEN3_INCLUDE_DIR})
+
+# Recorded lidar scan patterns, resolved by name from the sensor's scan_pattern param.
+install(DIRECTORY lidar_patterns/
+  DESTINATION share/${PROJECT_NAME}/lidar_patterns
+)
 
 install(TARGETS
   mujoco_system_plugins

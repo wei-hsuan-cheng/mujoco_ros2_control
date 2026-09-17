@@ -1,0 +1,5 @@
+controller_manager:
+  ros__parameters:
+    # Matches the model timestep (0.002 s). The lidar casts in slices on every
+    # read(), so this rate sets how finely per-point firing times are resolved.
+    update_rate: 500  # Hz

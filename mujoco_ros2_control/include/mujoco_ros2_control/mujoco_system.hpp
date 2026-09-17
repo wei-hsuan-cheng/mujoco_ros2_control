@@ -22,12 +22,14 @@
 #define MUJOCO_ROS2_CONTROL__MUJOCO_SYSTEM_HPP_
 
 #include <Eigen/Dense>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "control_toolbox/pid.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "joint_limits/joint_limits.hpp"
+#include "mujoco_ros2_control/mujoco_lidar.hpp"
 #include "mujoco_ros2_control/mujoco_system_interface.hpp"
 
 namespace mujoco_ros2_control
@@ -128,6 +130,7 @@ private:
     const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info);
   void register_sensors(
     const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info);
+  bool register_lidar(const hardware_interface::ComponentInfo &sensor);
   void set_initial_pose();
   void update_body_state_data();
   void get_joint_limits(
@@ -143,6 +146,8 @@ private:
   std::vector<FTSensorData> ft_sensor_data_;
   std::vector<IMUSensorData> imu_sensor_data_;
   std::vector<BodyStateData> body_state_data_;
+  // unique_ptr: the state interfaces point into each lidar's State, so it must not move.
+  std::vector<std::unique_ptr<MujocoLidar>> lidars_;
 
   mjModel *mj_model_;
   mjData *mj_data_;

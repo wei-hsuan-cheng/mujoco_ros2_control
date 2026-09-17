@@ -41,6 +41,8 @@
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
   <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>ament_index_cpp</depend>
 
   <exec_depend>rosidl_default_runtime</exec_depend>
 
