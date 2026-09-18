@@ -63,6 +63,7 @@
       <param name="scan_pattern">mid360</param>        <!-- or scan_pattern_file: path to an (N, 2) .npy -->
       <param name="frame_id">lidar_link</param>        <!-- default: the site name -->
       <param name="topic">/livox/lidar</param>         <!-- default: <sensor name>/points -->
+      <param name="qos_reliability">best_effort</param>
       <param name="frame_rate">10.0</param>
       <param name="points_per_frame">20000</param>
       <param name="min_range">0.1</param>

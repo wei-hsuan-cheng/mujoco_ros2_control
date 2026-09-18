@@ -516,11 +516,19 @@ bool MujocoSystem::register_lidar(const hardware_interface::ComponentInfo &senso
     config.seed = static_cast<unsigned int>(std::stoul(param("seed", "0")));
     config.intensity = std::stof(param("intensity", "100.0"));
     config.state_sectors = std::stoi(param("state_sectors", "0"));
+    config.qos_depth = std::stoi(param("qos_depth", "5"));
   }
   catch (const std::exception &)
   {
     return fail("a numeric parameter could not be parsed");
   }
+  const std::string reliability = lower_copy(param("qos_reliability", "reliable"));
+  if (reliability != "reliable" && reliability != "best_effort")
+  {
+    return fail("qos_reliability must be reliable or best_effort, got '" + reliability + "'");
+  }
+  config.best_effort = (reliability == "best_effort");
+
   const std::string filter = lower_copy(param("filter_robot_hits", "true"));
   if (filter != "true" && filter != "false" && filter != "1" && filter != "0")
   {

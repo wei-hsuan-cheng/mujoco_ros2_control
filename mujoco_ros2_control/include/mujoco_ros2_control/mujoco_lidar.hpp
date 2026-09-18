@@ -66,6 +66,8 @@ struct LidarConfig
   double range_noise_stddev{0.0};
   unsigned int seed{0};
   bool filter_robot_hits{true};
+  bool best_effort{false};  // best-effort QoS: drops instead of retransmitting
+  int qos_depth{5};
   float intensity{100.0F};
   int state_sectors{0};
 };
