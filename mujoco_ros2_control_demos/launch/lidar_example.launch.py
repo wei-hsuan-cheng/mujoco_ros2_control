@@ -38,7 +38,7 @@ def generate_launch_description():
             os.path.join(demos_path, 'config', 'lidar_example.yaml'),
             use_sim_time,
             {'mujoco_model_path': os.path.join(demos_path, 'mujoco_models', 'test_lidar.xml')},
-            {'mujoco_headless': ParameterValue(LaunchConfiguration('headless'), value_type=bool)},
+            {'mujoco_headless': ParameterValue(LaunchConfiguration('mujoco_headless'), value_type=bool)},
         ],
     )
 
@@ -61,7 +61,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('rviz', default_value='true', description='Open RViz on the cloud'),
-        DeclareLaunchArgument('headless', default_value='false',
+        DeclareLaunchArgument('mujoco_headless', default_value='false',
                               description='Run MuJoCo without its viewer window'),
         node_mujoco_ros2_control,
         node_robot_state_publisher,
