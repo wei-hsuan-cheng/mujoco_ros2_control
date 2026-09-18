@@ -460,7 +460,21 @@ void MujocoLidar::publish_loop()
     {
       std::memcpy(msg.data.data(), points.data(), msg.row_step);
     }
-    publisher_->publish(msg);
+    // Publishing after the context is shut down throws; an exception escaping a
+    // std::thread terminates the process.
+    if (!rclcpp::ok())
+    {
+      return;
+    }
+    try
+    {
+      publisher_->publish(msg);
+    }
+    catch (const std::exception &e)
+    {
+      RCLCPP_ERROR_STREAM_THROTTLE(
+        node_->get_logger(), *node_->get_clock(), 5000, "lidar publish failed: " << e.what());
+    }
   }
 }
 

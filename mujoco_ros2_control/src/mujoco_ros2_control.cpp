@@ -60,8 +60,21 @@ MujocoRos2Control::MujocoRos2Control(
 MujocoRos2Control::~MujocoRos2Control()
 {
   stop_cm_thread_ = true;
-  cm_executor_->remove_node(controller_manager_);
-  cm_executor_->cancel();
+  // remove_node throws if the node is no longer associated with the executor, and a
+  // destructor that throws while another exception is unwinding terminates the
+  // process (std::terminate) instead of shutting down.
+  try
+  {
+    if (cm_executor_ && controller_manager_)
+    {
+      cm_executor_->remove_node(controller_manager_);
+    }
+  }
+  catch (const std::exception &e)
+  {
+    RCLCPP_WARN_STREAM(logger_, "Could not remove the controller manager node: " << e.what());
+  }
+  if (cm_executor_) cm_executor_->cancel();
 
   if (cm_thread_.joinable()) cm_thread_.join();
 }

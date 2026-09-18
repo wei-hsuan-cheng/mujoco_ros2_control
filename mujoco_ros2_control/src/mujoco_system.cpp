@@ -138,10 +138,21 @@ hardware_interface::return_type MujocoSystem::read(
   update_body_state_data();
 
   // Lidar last: it casts against the current kinematics, which mj_step1 has already
-  // computed for this step.
+  // computed for this step. Guarded: a sensor fault must not escape read() and
+  // tear down the simulation, and an exception thrown here would propagate out of
+  // the main loop and abort during unwinding.
   for (auto &lidar : lidars_)
   {
-    lidar->update(mj_model_, mj_data_);
+    try
+    {
+      lidar->update(mj_model_, mj_data_);
+    }
+    catch (const std::exception &e)
+    {
+      RCLCPP_ERROR_STREAM_THROTTLE(
+        logger_, *rclcpp::Clock::make_shared(), 5000,
+        "Lidar '" << lidar->config().name << "' update failed: " << e.what());
+    }
   }
 
   return hardware_interface::return_type::OK;
