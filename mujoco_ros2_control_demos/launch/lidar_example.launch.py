@@ -55,7 +55,7 @@ def generate_launch_description():
         name='rviz2',
         output='screen',
         parameters=[use_sim_time],
-        arguments=['-d', os.path.join(demos_path, 'launch', 'lidar_demo.rviz')],
+        arguments=['-d', os.path.join(demos_path, 'rviz', 'lidar_demo.rviz')],
         condition=IfCondition(LaunchConfiguration('rviz')),
     )
 

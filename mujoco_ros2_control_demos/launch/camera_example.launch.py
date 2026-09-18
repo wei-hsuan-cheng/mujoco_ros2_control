@@ -21,7 +21,7 @@ def generate_launch_description():
                                           'config',
                                           'camera_controller_position.yaml')
     rviz_config_file = os.path.join(mujoco_ros2_control_demos_path,
-                                          'launch',
+                                          'rviz',
                                           'camera_demo.rviz')
 
     doc = xacro.parse(open(xacro_file))

@@ -27,6 +27,7 @@ set(THIS_PACKAGE_DEPENDS
 )
 
 install(DIRECTORY
+  rviz
   launch
   config
   urdf
