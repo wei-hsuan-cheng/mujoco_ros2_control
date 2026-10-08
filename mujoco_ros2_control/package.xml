@@ -26,6 +26,8 @@
   <depend>control_toolbox</depend>
   <depend>std_srvs</depend>
   <depend>diagnostic_msgs</depend>
+  <!-- Resolved by rosdep to libglfw3-dev; CMakeLists builds GLFW from source if it's missing -->
+  <build_depend>libglfw3-dev</build_depend>
   <exec_depend>ros2controlcli</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>effort_controllers</exec_depend>

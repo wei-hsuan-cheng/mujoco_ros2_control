@@ -19,7 +19,6 @@ find_package(pluginlib REQUIRED)
 find_package(controller_manager REQUIRED)
 find_package(joint_limits REQUIRED)
 find_package(urdf REQUIRED)
-find_package(glfw3 REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(control_toolbox REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -47,7 +46,6 @@ set(THIS_PACKAGE_DEPENDS
   controller_manager
   joint_limits
   urdf
-  glfw3
   control_toolbox
   std_srvs
   diagnostic_msgs
@@ -59,6 +57,41 @@ set(THIS_PACKAGE_DEPENDS
   ament_index_cpp
 )
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# GLFW resolution order (only the mujoco_ros2_control_node viewer links it):
+#   1. an installed glfw3 (apt libglfw3-dev, pulled in by rosdep from package.xml,
+#      or a source install)
+#   2. automatic download of the GLFW source release, built as a static library
+#      inside this package's build directory, so nothing has to be installed
+#      system-wide. X11 only (no Wayland), using the X11/GL -dev headers.
+set(GLFW_VERSION "3.4" CACHE STRING
+  "GLFW source release built automatically when no installed glfw3 is found")
+
+find_package(glfw3 QUIET)
+if(glfw3_FOUND)
+  message(STATUS "Using installed glfw3 ${glfw3_VERSION}")
+else()
+  message(STATUS "glfw3 not found; downloading and building GLFW ${GLFW_VERSION} from source")
+  include(FetchContent)
+  set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+  set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+  set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+
+  set(GLFW_URL https://github.com/glfw/glfw/releases/download/${GLFW_VERSION}/glfw-${GLFW_VERSION}.zip)
+  if(GLFW_VERSION STREQUAL "3.4")
+    set(GLFW_URL_HASH URL_HASH SHA256=b5ec004b2712fd08e8861dc271428f048775200a2df719ccf575143ba749a3e9)
+  endif()
+  FetchContent_Declare(glfw URL ${GLFW_URL} ${GLFW_URL_HASH})
+  FetchContent_GetProperties(glfw)
+  if(NOT glfw_POPULATED)
+    FetchContent_Populate(glfw)
+    # EXCLUDE_FROM_ALL: build only what the node links, keep GLFW out of the install
+    add_subdirectory(${glfw_SOURCE_DIR} ${glfw_BINARY_DIR} EXCLUDE_FROM_ALL)
+  endif()
+  set_target_properties(glfw PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
 
 # MuJoCo resolution order:
 #   1. a source-installed mujoco (find_package)
