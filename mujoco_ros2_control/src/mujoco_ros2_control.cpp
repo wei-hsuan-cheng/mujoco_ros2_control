@@ -42,6 +42,15 @@ std::string lower_copy(std::string value)
     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   return value;
 }
+
+// The controller manager loads the URDF itself unless the resource manager reports
+// its components initialized; here the MuJoCo systems are imported directly instead.
+class MujocoResourceManager : public hardware_interface::ResourceManager
+{
+public:
+  using hardware_interface::ResourceManager::ResourceManager;
+  void mark_components_initialized() { components_are_loaded_and_initialized_ = true; }
+};
 }  // namespace
 
 namespace mujoco_ros2_control
@@ -147,21 +156,12 @@ void MujocoRos2Control::init()
     return;
   }
 
-  std::unique_ptr<hardware_interface::ResourceManager> resource_manager =
-    std::make_unique<hardware_interface::ResourceManager>();
-
-  try
-  {
-    resource_manager->load_urdf(urdf_string, false, false);
-  }
-  catch (...)
-  {
-    RCLCPP_ERROR(logger_, "Error while initializing URDF!");
-  }
+  auto resource_manager = std::make_unique<MujocoResourceManager>(
+    node_->get_node_clock_interface(), node_->get_node_logging_interface());
 
   for (const auto &hardware : control_hardware_info)
   {
-    std::string robot_hw_sim_type_str_ = hardware.hardware_class_type;
+    std::string robot_hw_sim_type_str_ = hardware.hardware_plugin_name;
     std::unique_ptr<MujocoSystemInterface> mujoco_system;
     try
     {
@@ -182,13 +182,19 @@ void MujocoRos2Control::init()
       return;
     }
 
-    resource_manager->import_component(std::move(mujoco_system), hardware);
+    hardware_interface::HardwareComponentParams component_params;
+    component_params.hardware_info = hardware;
+    component_params.logger = logger_;
+    component_params.clock = node_->get_clock();
+    resource_manager->import_component(std::move(mujoco_system), component_params);
 
     rclcpp_lifecycle::State state(
       lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE,
       hardware_interface::lifecycle_state_names::ACTIVE);
     resource_manager->set_component_state(hardware.name, state);
   }
+
+  resource_manager->mark_components_initialized();
 
   // Create the controller manager
   RCLCPP_INFO(logger_, "Loading controller_manager");
