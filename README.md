@@ -12,7 +12,7 @@ Follow these steps to install and run the project locally.
 
 ### Prerequisites
 
-Make sure you have [ROS 2](https://docs.ros.org/en/humble/Installation.html) installed.
+Make sure you have [ROS 2 Jazzy](https://docs.ros.org/en/jazzy/Installation.html) installed. This branch targets ros2_control 4.x; ROS 2 Humble is on the `humble` branch.
 
 ### Package Install
 
