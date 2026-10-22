@@ -272,7 +272,13 @@ void MujocoRos2Control::update()
 
 void MujocoRos2Control::update_controller_manager()
 {
-  const rclcpp::Time sim_time(0, 0, RCL_ROS_TIME);
+  // The controller manager refuses a zero time until its clock has started, and with
+  // use_sim_time the clock starts only on a non-zero /clock. Physics has not advanced, so
+  // hold the time one nanosecond in and publish it.
+  const rclcpp::Time sim_time(0, 1, RCL_ROS_TIME);
+  rosgraph_msgs::msg::Clock sim_time_msg;
+  sim_time_msg.clock = sim_time;
+  clock_publisher_->publish(sim_time_msg);
   const rclcpp::Duration zero_period(0, 0);
   controller_manager_->read(sim_time, zero_period);
   controller_manager_->update(sim_time, zero_period);
