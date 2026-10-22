@@ -127,7 +127,8 @@ std::string MujocoRos2Control::get_robot_description()
 
 void MujocoRos2Control::init()
 {
-  clock_publisher_ = node_->create_publisher<rosgraph_msgs::msg::Clock>("/clock", 10);
+  clock_publisher_ = node_->create_publisher<rosgraph_msgs::msg::Clock>(
+    "/clock", rclcpp::QoS(10).best_effort());
   init_publish_rate();
   init_external_wrench();
 
@@ -389,11 +390,11 @@ void MujocoRos2Control::init_external_wrench()
   external_wrench_sub_ =
     node_->create_subscription<mujoco_ros2_control::msg::MujocoExternalWrench>(
     external_wrench_topic,
-    rclcpp::QoS(10),
+    rclcpp::QoS(10).best_effort(),
     std::bind(&MujocoRos2Control::external_wrench_callback, this, std::placeholders::_1));
   legacy_external_wrench_sub_ = node_->create_subscription<geometry_msgs::msg::WrenchStamped>(
     legacy_external_wrench_topic,
-    rclcpp::QoS(10),
+    rclcpp::QoS(10).best_effort(),
     std::bind(
       &MujocoRos2Control::legacy_external_wrench_callback,
       this,
@@ -401,7 +402,7 @@ void MujocoRos2Control::init_external_wrench()
   external_wrench_visualization_pub_ =
     node_->create_publisher<geometry_msgs::msg::WrenchStamped>(
       external_wrench_visualization_topic,
-      rclcpp::QoS(10));
+      rclcpp::QoS(10).best_effort());
 
   RCLCPP_INFO(
     logger_,
@@ -838,7 +839,8 @@ void MujocoRos2Control::init_ground_truth()
     gt_tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
 
   if (!gt_odom_topic_.empty())
-    gt_odom_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>(gt_odom_topic_, rclcpp::QoS(10));
+    gt_odom_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>(
+      gt_odom_topic_, rclcpp::QoS(10).best_effort());
 
   // Resolve body IDs
   gt_body_ids_.clear();

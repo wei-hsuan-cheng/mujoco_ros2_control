@@ -233,13 +233,10 @@ bool MujocoLidar::init(const mjModel *mujoco_model, std::string &error)
 
   // Publishers need no executor, so this node is never spun.
   node_ = rclcpp::Node::make_shared("mujoco_lidar_" + sanitize_node_name(config_.name));
-  // Reliable by default because a reliable publisher can feed both reliable and
-  // best-effort subscribers, while a best-effort publisher is INVISIBLE to a
-  // reliable one. Set best_effort for sensor-style delivery: a late frame is
-  // dropped rather than retransmitted, which keeps a slow consumer from
-  // back-pressuring a 10 Hz cloud.
+  // Sensor data uses best-effort delivery so stale frames are dropped instead
+  // of retransmitted to a slow consumer.
   rclcpp::QoS qos(rclcpp::KeepLast(static_cast<size_t>(config_.qos_depth)));
-  config_.best_effort ? qos.best_effort() : qos.reliable();
+  qos.best_effort();
   publisher_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>(config_.topic, qos);
   publish_thread_ = std::thread(&MujocoLidar::publish_loop, this);
 
@@ -249,7 +246,7 @@ bool MujocoLidar::init(const mjModel *mujoco_model, std::string &error)
     "pattern, publishing %s (%s, depth %d) in frame '%s'",
     config_.name.c_str(), config_.site_name.c_str(), config_.points_per_frame, config_.frame_rate,
     config_.min_range, config_.max_range, pattern_size_, publisher_->get_topic_name(),
-    config_.best_effort ? "best effort" : "reliable", config_.qos_depth,
+    "best effort", config_.qos_depth,
     config_.frame_id.c_str());
   return true;
 }

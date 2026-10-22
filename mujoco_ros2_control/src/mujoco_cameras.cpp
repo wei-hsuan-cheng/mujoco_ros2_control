@@ -174,11 +174,14 @@ void MujocoCameras::register_cameras(const mjModel *mujoco_model)
     camera.frame_name = camera.name + "_optical_frame";
 
     // Configure publishers
-    camera.image_pub = node_->create_publisher<sensor_msgs::msg::Image>(camera.name + "/color", 1);
+    camera.image_pub = node_->create_publisher<sensor_msgs::msg::Image>(
+      camera.name + "/color", rclcpp::QoS(1).best_effort());
     camera.depth_image_pub =
-      node_->create_publisher<sensor_msgs::msg::Image>(camera.name + "/depth", 1);
+      node_->create_publisher<sensor_msgs::msg::Image>(
+        camera.name + "/depth", rclcpp::QoS(1).best_effort());
     camera.camera_info_pub =
-      node_->create_publisher<sensor_msgs::msg::CameraInfo>(camera.name + "/camera_info", 1);
+      node_->create_publisher<sensor_msgs::msg::CameraInfo>(
+        camera.name + "/camera_info", rclcpp::QoS(1).best_effort());
 
     // Setup contaienrs for color image data
     camera.image.header.frame_id = camera.frame_name;
