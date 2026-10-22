@@ -23,6 +23,7 @@
 
 #include <Eigen/Dense>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -132,6 +133,8 @@ private:
     const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info);
   bool register_lidar(const hardware_interface::ComponentInfo &sensor);
   void set_initial_pose();
+  //! Spawn height of the free joint, if the hardware sets initial_base_height.
+  std::optional<double> initial_base_height_;
   void update_body_state_data();
   void get_joint_limits(
     urdf::JointConstSharedPtr urdf_joint, joint_limits::JointLimits &joint_limits);

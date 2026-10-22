@@ -277,6 +277,15 @@ bool MujocoSystem::init_sim(
     logger_, "Effort command mode: %s",
     use_actuator_effort_command_ ? "mujoco actuator ctrl" : "direct qfrc_applied");
 
+  // Optional spawn height of the floating base, so a non-standing initial pose
+  // (e.g. a crouch) can start with its feet on the floor rather than dropping
+  // from the height the MJCF body was authored at.
+  const auto base_height_it = hardware_info.hardware_parameters.find("initial_base_height");
+  if (base_height_it != hardware_info.hardware_parameters.end() && !base_height_it->second.empty())
+  {
+    initial_base_height_ = std::stod(base_height_it->second);
+  }
+
   register_joints(urdf_model, hardware_info);
   register_sensors(urdf_model, hardware_info);
 
@@ -884,6 +893,18 @@ void MujocoSystem::set_initial_pose()
   for (auto &joint_state : joint_states_)
   {
     mj_data_->qpos[joint_state.mj_pos_adr] = joint_state.position;
+  }
+  if (initial_base_height_)
+  {
+    for (int j = 0; j < mj_model_->njnt; ++j)
+    {
+      if (mj_model_->jnt_type[j] == mjJNT_FREE)
+      {
+        mj_data_->qpos[mj_model_->jnt_qposadr[j] + 2] = *initial_base_height_;
+        RCLCPP_INFO(logger_, "Initial base height: %.4f m", *initial_base_height_);
+        break;
+      }
+    }
   }
   mj_forward(mj_model_, mj_data_);
   update_body_state_data();
