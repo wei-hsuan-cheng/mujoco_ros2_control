@@ -78,7 +78,10 @@ public:
     bool is_velocity_control_enabled{false};
     bool is_effort_control_enabled{false};
     bool is_pid_enabled{false};
-    // effort_pd: per-physics-step joint servo tau = pd_kp*(q_des-q) + pd_kd*(qd_des-qd) + effort_command
+    // effort_pd: per-physics-step joint servo tau = pd_kp*(q_des-q) + pd_kd*(qd_des-qd) + effort_command.
+    // pd_kp / pd_kd start at the effort_pd_kp / effort_pd_kd joint parameters and are also the "kp" /
+    // "kd" command interfaces when the joint declares them, so a controller can set them per joint
+    // and per tick (as Unitree's LowCmd carries kp/kd with every motor command).
     bool is_effort_pd_enabled{false};
     double pd_kp{0.0};
     double pd_kd{0.0};

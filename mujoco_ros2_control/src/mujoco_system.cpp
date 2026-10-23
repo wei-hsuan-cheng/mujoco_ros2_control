@@ -182,10 +182,12 @@ hardware_interface::return_type MujocoSystem::write(
   {
     if (joint_state.is_effort_pd_enabled)
     {
-      // PD + feedforward evaluated against the live state every physics step.
+      // PD + feedforward evaluated against the live state every physics step. The gains may be
+      // written by a controller, so a non-finite or negative one is treated as zero.
+      const auto gain = [](double g) { return std::isfinite(g) && g > 0.0 ? g : 0.0; };
       double tau =
-        joint_state.pd_kp * (joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr]) +
-        joint_state.pd_kd * (joint_state.velocity_command - mj_data_->qvel[joint_state.mj_vel_adr]) +
+        gain(joint_state.pd_kp) * (joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr]) +
+        gain(joint_state.pd_kd) * (joint_state.velocity_command - mj_data_->qvel[joint_state.mj_vel_adr]) +
         joint_state.effort_command;
       tau = std::isfinite(tau) ? tau : 0.0;
       if (use_actuator_effort_command_ && joint_state.mj_actuator_id >= 0)
@@ -453,6 +455,15 @@ void MujocoSystem::register_joints(
         last_joint_state.effort_command = last_joint_state.effort;
         last_joint_state.min_effort_command = get_min_value(command_if);
         last_joint_state.max_effort_command = get_max_value(command_if);
+      }
+      else if (command_if.name == "kp")
+      {
+        // effort_pd servo gains, initialised from effort_pd_kp / effort_pd_kd below.
+        command_interfaces_.emplace_back(joint.name, "kp", &last_joint_state.pd_kp);
+      }
+      else if (command_if.name == "kd")
+      {
+        command_interfaces_.emplace_back(joint.name, "kd", &last_joint_state.pd_kd);
       }
 
       if (command_if.name.find("_pid") != std::string::npos)
