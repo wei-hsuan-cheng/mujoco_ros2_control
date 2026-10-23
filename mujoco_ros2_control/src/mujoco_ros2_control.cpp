@@ -30,6 +30,7 @@
 #include <utility>
 
 #include "mujoco_ros2_control/mujoco_ros2_control.hpp"
+#include "rcl/time.h"
 
 namespace
 {
@@ -200,8 +201,21 @@ void MujocoRos2Control::init()
   // Create the controller manager
   RCLCPP_INFO(logger_, "Loading controller_manager");
   cm_executor_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
+  if (!node_->has_parameter("controller_time_from_sim"))
+    node_->declare_parameter<bool>("controller_time_from_sim", true);
+  controller_time_from_sim_ = node_->get_parameter("controller_time_from_sim").as_bool();
+  auto cm_options = controller_manager::get_cm_node_options();
+  if (controller_time_from_sim_)
+  {
+    // The controller manager stamps controller updates with its own clock, which follows /clock:
+    // that only advances at mujoco_publish_rate (10 ms steps at the default 100 Hz), and
+    // asynchronously. Remap this one node's /clock to an unused topic and override its ROS time
+    // from the simulation loop instead (update()). use_sim_time stays true, so the controllers it
+    // loads still get use_sim_time:=true and their own clocks keep following /clock.
+    cm_options.arguments({"--ros-args", "-r", "/clock:=/mujoco_ros2_control/unused_cm_clock"});
+  }
   controller_manager_ = std::make_shared<controller_manager::ControllerManager>(
-    std::move(resource_manager), cm_executor_, "controller_manager", node_->get_namespace());
+    std::move(resource_manager), cm_executor_, "controller_manager", node_->get_namespace(), cm_options);
   cm_executor_->add_node(controller_manager_);
 
   if (!controller_manager_->has_parameter("update_rate"))
@@ -214,9 +228,11 @@ void MujocoRos2Control::init()
   control_period_ = rclcpp::Duration(std::chrono::duration_cast<std::chrono::nanoseconds>(
     std::chrono::duration<double>(1.0 / static_cast<double>(update_rate))));
 
-  // Force setting of use_sime_time parameter
+  // Force setting of use_sime_time parameter (enables the ROS-time override on its clock).
   controller_manager_->set_parameter(
     rclcpp::Parameter("use_sim_time", rclcpp::ParameterValue(true)));
+  RCLCPP_INFO(logger_, "Controller time: %s.",
+              controller_time_from_sim_ ? "MuJoCo time, set every update" : "/clock");
 
   stop_cm_thread_ = false;
   auto spin = [this]()
@@ -258,6 +274,11 @@ void MujocoRos2Control::update()
 
   if (sim_period >= control_period_)
   {
+    if (controller_time_from_sim_)
+    {
+      rcl_set_ros_time_override(controller_manager_->get_clock()->get_clock_handle(),
+                                sim_time_ros.nanoseconds());
+    }
     controller_manager_->read(sim_time_ros, sim_period);
     controller_manager_->update(sim_time_ros, sim_period);
     last_update_sim_time_ros_ = sim_time_ros;

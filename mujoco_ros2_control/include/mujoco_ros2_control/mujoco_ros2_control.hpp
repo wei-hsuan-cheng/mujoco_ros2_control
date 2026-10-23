@@ -119,6 +119,10 @@ private:
   rclcpp::Time last_update_sim_time_ros_;
   rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_publisher_;
   double mujoco_publish_rate_{100.0};
+  // controller_time_from_sim: the controller manager's clock is set from mj_data->time before
+  // every update instead of following /clock, so controllers see the exact 1/update_rate step
+  // whatever mujoco_publish_rate is (at the default 100 Hz they otherwise saw 10 ms steps).
+  bool controller_time_from_sim_{true};
   rclcpp::Duration mujoco_publish_period_{0, 0};
   rclcpp::Time last_mujoco_publish_time_{0, 0, RCL_ROS_TIME};
   bool publish_this_step_{true};
