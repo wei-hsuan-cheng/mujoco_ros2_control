@@ -109,6 +109,8 @@ private:
 
   rclcpp::Logger logger_;
   std::shared_ptr<pluginlib::ClassLoader<MujocoSystemInterface>> robot_hw_sim_loader_;
+  //! The simulated systems, owned by the controller manager's resource manager; post_step() hooks.
+  std::vector<MujocoSystemInterface *> sim_systems_;
 
   std::shared_ptr<controller_manager::ControllerManager> controller_manager_;
   rclcpp::Executor::SharedPtr cm_executor_;

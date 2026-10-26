@@ -184,6 +184,7 @@ void MujocoRos2Control::init()
       return;
     }
 
+    sim_systems_.push_back(mujoco_system.get());  // owned by the resource manager from here on
     hardware_interface::HardwareComponentParams component_params;
     component_params.hardware_info = hardware;
     component_params.logger = logger_;
@@ -290,6 +291,10 @@ void MujocoRos2Control::update()
   apply_external_wrenches();
 
   mj_step2(mj_model_, mj_data_);
+  for (auto *system : sim_systems_)
+  {
+    system->post_step();
+  }
 }
 
 void MujocoRos2Control::update_controller_manager()

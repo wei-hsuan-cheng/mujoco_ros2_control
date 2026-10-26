@@ -37,6 +37,12 @@ public:
     mjModel *mujoco_model, mjData *mujoco_data, const urdf::Model &urdf_model,
     const hardware_interface::HardwareInfo &hardware_info) = 0;
 
+  /// Called after every mj_step2, while the contacts, constraint forces and acceleration-stage
+  /// sensors of the step just completed are still consistent with each other. read() runs after
+  /// the next mj_step1, when the contact list already belongs to the new step but its forces are
+  /// not solved yet, so anything derived from contact forces must be captured here.
+  virtual void post_step() {}
+
 protected:
 };
 }  // namespace mujoco_ros2_control

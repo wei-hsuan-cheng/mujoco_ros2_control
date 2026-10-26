@@ -57,6 +57,8 @@ public:
     mjModel *mujoco_model, mjData *mujoco_data, const urdf::Model &urdf_model,
     const hardware_interface::HardwareInfo &hardware_info) override;
 
+  void post_step() override;
+
   struct JointState
   {
     std::string name;
@@ -129,6 +131,23 @@ public:
     Eigen::Vector3d angular_velocity{Eigen::Vector3d::Zero()};
   };
 
+  /// Net contact wrench on one body (optionally with its whole subtree) from every active contact
+  /// with something outside that set, about the body origin. Simulation-only ground truth, e.g. to
+  /// validate a contact estimator; a real robot needs a force sensor for the same signal.
+  struct ContactWrenchData
+  {
+    std::string name;
+    std::string body_name;
+    int mj_body_id{-1};
+    std::vector<char> member;  //!< per MuJoCo body: belongs to the measured set
+    bool body_frame{false};    //!< express force/torque in the body frame instead of world
+    double contact_threshold{1.0};
+    Eigen::Vector3d force{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d torque{Eigen::Vector3d::Zero()};
+    double normal_force{0.0};  //!< sum of the contact-normal force components [N]
+    double contact{0.0};       //!< 1 when normal_force exceeds contact_threshold
+  };
+
 private:
   void register_joints(
     const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info);
@@ -139,6 +158,8 @@ private:
   //! Spawn height of the free joint, if the hardware sets initial_base_height.
   std::optional<double> initial_base_height_;
   void update_body_state_data();
+  void update_contact_wrench_data();
+  bool register_contact_wrench(const hardware_interface::ComponentInfo &sensor);
   void get_joint_limits(
     urdf::JointConstSharedPtr urdf_joint, joint_limits::JointLimits &joint_limits);
   control_toolbox::Pid get_pid_gains(
@@ -152,6 +173,7 @@ private:
   std::vector<FTSensorData> ft_sensor_data_;
   std::vector<IMUSensorData> imu_sensor_data_;
   std::vector<BodyStateData> body_state_data_;
+  std::vector<ContactWrenchData> contact_wrench_data_;
   // unique_ptr: the state interfaces point into each lidar's State, so it must not move.
   std::vector<std::unique_ptr<MujocoLidar>> lidars_;
 

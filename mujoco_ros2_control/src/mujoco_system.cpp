@@ -38,6 +38,10 @@ constexpr char PARAM_MUJOCO_GYRO_SENSOR_NAME[] = "mujoco_gyro_sensor_name";
 constexpr char PARAM_MUJOCO_ACCEL_SENSOR_NAME[] = "mujoco_accel_sensor_name";
 constexpr char PARAM_MUJOCO_BODY_NAME[] = "mujoco_body_name";
 constexpr char PARAM_MUJOCO_SITE_NAME[] = "mujoco_site_name";
+constexpr char PARAM_MUJOCO_CONTACT_BODY_NAME[] = "mujoco_contact_body_name";
+constexpr char PARAM_MUJOCO_CONTACT_INCLUDE_SUBTREE[] = "mujoco_contact_include_subtree";
+constexpr char PARAM_MUJOCO_CONTACT_FRAME[] = "mujoco_contact_frame";
+constexpr char PARAM_MUJOCO_CONTACT_THRESHOLD[] = "mujoco_contact_threshold";
 constexpr char PARAM_LIDAR_SCAN_PATTERN[] = "scan_pattern";
 constexpr char PARAM_LIDAR_SCAN_PATTERN_FILE[] = "scan_pattern_file";
 
@@ -631,6 +635,7 @@ void MujocoSystem::register_sensors(
   const urdf::Model & /* urdf_model */, const hardware_interface::HardwareInfo &hardware_info)
 {
   body_state_data_.reserve(hardware_info.sensors.size());
+  contact_wrench_data_.reserve(hardware_info.sensors.size());  // interfaces point into it
   ft_sensor_data_.reserve(hardware_info.sensors.size());
   imu_sensor_data_.reserve(hardware_info.sensors.size());
 
@@ -647,7 +652,12 @@ void MujocoSystem::register_sensors(
       has_sensor_param(sensor, PARAM_MUJOCO_ACCEL_SENSOR_NAME);
     const bool has_body_state_mapping = has_sensor_param(sensor, PARAM_MUJOCO_BODY_NAME);
 
-    if (has_body_state_mapping)
+    if (has_sensor_param(sensor, PARAM_MUJOCO_CONTACT_BODY_NAME))
+    {
+      register_contact_wrench(sensor);
+    }
+
+    else if (has_body_state_mapping)
     {
       BodyStateData sensor_data;
       sensor_data.name = sensor.name;
@@ -892,6 +902,120 @@ void MujocoSystem::register_sensors(
   }
 }
 
+bool MujocoSystem::register_contact_wrench(const hardware_interface::ComponentInfo &sensor)
+{
+  ContactWrenchData data;
+  data.name = sensor.name;
+  data.body_name = sensor.parameters.at(PARAM_MUJOCO_CONTACT_BODY_NAME);
+  data.mj_body_id = mj_name2id(mj_model_, mjOBJ_BODY, data.body_name.c_str());
+  if (data.mj_body_id < 0)
+  {
+    RCLCPP_ERROR_STREAM(
+      logger_, "Contact-wrench sensor '" << sensor.name << "': no MuJoCo body '" << data.body_name
+                                         << "'");
+    return false;
+  }
+  const std::string frame =
+    lower_copy(get_sensor_param_or_default(sensor, PARAM_MUJOCO_CONTACT_FRAME, "world"));
+  if (frame != "world" && frame != "body")
+  {
+    RCLCPP_ERROR_STREAM(
+      logger_, "Contact-wrench sensor '" << sensor.name << "': " << PARAM_MUJOCO_CONTACT_FRAME
+                                         << " must be 'world' or 'body', got '" << frame << "'");
+    return false;
+  }
+  data.body_frame = (frame == "body");
+  data.contact_threshold =
+    std::stod(get_sensor_param_or_default(sensor, PARAM_MUJOCO_CONTACT_THRESHOLD, "1.0"));
+  const bool subtree = lower_copy(get_sensor_param_or_default(
+                         sensor, PARAM_MUJOCO_CONTACT_INCLUDE_SUBTREE, "true")) != "false";
+
+  // Bodies are numbered parents first, so one forward pass marks a whole subtree.
+  data.member.assign(static_cast<size_t>(mj_model_->nbody), 0);
+  data.member[static_cast<size_t>(data.mj_body_id)] = 1;
+  if (subtree)
+  {
+    for (int body = data.mj_body_id + 1; body < mj_model_->nbody; ++body)
+    {
+      data.member[static_cast<size_t>(body)] =
+        data.member[static_cast<size_t>(mj_model_->body_parentid[body])];
+    }
+  }
+
+  contact_wrench_data_.push_back(data);
+  auto &last = contact_wrench_data_.back();
+  for (const auto &state_if : sensor.state_interfaces)
+  {
+    double *value = nullptr;
+    if (state_if.name == "force.x") value = &last.force.x();
+    else if (state_if.name == "force.y") value = &last.force.y();
+    else if (state_if.name == "force.z") value = &last.force.z();
+    else if (state_if.name == "torque.x") value = &last.torque.x();
+    else if (state_if.name == "torque.y") value = &last.torque.y();
+    else if (state_if.name == "torque.z") value = &last.torque.z();
+    else if (state_if.name == "normal_force") value = &last.normal_force;
+    else if (state_if.name == "contact") value = &last.contact;
+    if (value == nullptr)
+    {
+      RCLCPP_WARN_STREAM(
+        logger_, "Contact-wrench sensor '" << sensor.name << "': unknown state interface '"
+                                           << state_if.name << "' ignored");
+      continue;
+    }
+    state_interfaces_.emplace_back(sensor.name, state_if.name, value);
+  }
+  return true;
+}
+
+void MujocoSystem::post_step() { update_contact_wrench_data(); }
+
+void MujocoSystem::update_contact_wrench_data()
+{
+  for (auto &data : contact_wrench_data_)
+  {
+    const Eigen::Vector3d origin(mj_data_->xpos + 3 * data.mj_body_id);
+    Eigen::Vector3d force = Eigen::Vector3d::Zero();
+    Eigen::Vector3d torque = Eigen::Vector3d::Zero();
+    double normal_force = 0.0;
+    for (int i = 0; i < mj_data_->ncon; ++i)
+    {
+      const mjContact &con = mj_data_->contact[i];
+      if (con.exclude != 0 || con.efc_address < 0 || con.geom[0] < 0 || con.geom[1] < 0)
+      {
+        continue;
+      }
+      const bool in1 = data.member[static_cast<size_t>(mj_model_->geom_bodyid[con.geom[0]])];
+      const bool in2 = data.member[static_cast<size_t>(mj_model_->geom_bodyid[con.geom[1]])];
+      if (in1 == in2)
+      {
+        continue;  // not touching the set, or a contact inside it
+      }
+      // mj_contactForce gives the force geom1 exerts on geom2 in the contact frame, whose rows
+      // are the normal (pointing from geom1 to geom2) and the two tangents.
+      mjtNum local[6];
+      mj_contactForce(mj_model_, mj_data_, i, local);
+      const Eigen::Map<const Eigen::Matrix<mjtNum, 3, 3, Eigen::RowMajor>> frame(con.frame);
+      const double sign = in2 ? 1.0 : -1.0;
+      const Eigen::Vector3d f = sign * frame.transpose() * Eigen::Vector3d(local[0], local[1], local[2]);
+      const Eigen::Vector3d t = sign * frame.transpose() * Eigen::Vector3d(local[3], local[4], local[5]);
+      force += f;
+      torque += (Eigen::Vector3d(con.pos) - origin).cross(f) + t;
+      normal_force += local[0];
+    }
+    if (data.body_frame)
+    {
+      const Eigen::Map<const Eigen::Matrix<mjtNum, 3, 3, Eigen::RowMajor>> rotation(
+        mj_data_->xmat + 9 * data.mj_body_id);
+      force = rotation.transpose() * force;
+      torque = rotation.transpose() * torque;
+    }
+    data.force = force;
+    data.torque = torque;
+    data.normal_force = normal_force;
+    data.contact = normal_force > data.contact_threshold ? 1.0 : 0.0;
+  }
+}
+
 void MujocoSystem::set_initial_pose()
 {
   for (auto &joint_state : joint_states_)
@@ -912,6 +1036,7 @@ void MujocoSystem::set_initial_pose()
   }
   mj_forward(mj_model_, mj_data_);
   update_body_state_data();
+  update_contact_wrench_data();
 }
 
 void MujocoSystem::update_body_state_data()
