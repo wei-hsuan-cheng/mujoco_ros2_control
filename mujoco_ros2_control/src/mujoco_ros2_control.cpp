@@ -198,6 +198,8 @@ void MujocoRos2Control::init()
   }
 
   resource_manager->mark_components_initialized();
+  // The controller manager takes ownership below; keep a handle to re-activate the components
+  MujocoResourceManager * sim_resource_manager = resource_manager.get();
 
   // Create the controller manager
   RCLCPP_INFO(logger_, "Loading controller_manager");
@@ -218,6 +220,17 @@ void MujocoRos2Control::init()
   controller_manager_ = std::make_shared<controller_manager::ControllerManager>(
     std::move(resource_manager), cm_executor_, "controller_manager", node_->get_namespace(), cm_options);
   cm_executor_->add_node(controller_manager_);
+
+  // On creation the controller manager applies hardware_components_initial_state (e.g. an arm
+  // starting inactive until a hardware activation controller enables it). In simulation nothing
+  // activates those components later, so keep every simulated component active, as on Humble.
+  for (const auto &hardware : control_hardware_info)
+  {
+    rclcpp_lifecycle::State active(
+      lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE,
+      hardware_interface::lifecycle_state_names::ACTIVE);
+    sim_resource_manager->set_component_state(hardware.name, active);
+  }
 
   if (!controller_manager_->has_parameter("update_rate"))
   {
