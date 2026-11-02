@@ -212,9 +212,9 @@ void MujocoRos2Control::init()
   {
     // The controller manager stamps controller updates with its own clock, which follows /clock:
     // that only advances at mujoco_publish_rate (10 ms steps at the default 100 Hz), and
-    // asynchronously. Remap this one node's /clock to an unused topic and override its ROS time
-    // from the simulation loop instead (update()). use_sim_time stays true, so the controllers it
-    // loads still get use_sim_time:=true and their own clocks keep following /clock.
+    // asynchronously. Remap /clock to an unused topic and override the ROS time from the simulation
+    // loop instead (update()). use_sim_time stays true, so the controllers it loads still get
+    // use_sim_time:=true. They also inherit these arguments, so update() overrides their clocks too.
     cm_options.arguments({"--ros-args", "-r", "/clock:=/mujoco_ros2_control/unused_cm_clock"});
   }
   controller_manager_ = std::make_shared<controller_manager::ControllerManager>(
@@ -254,6 +254,18 @@ void MujocoRos2Control::init()
     while (rclcpp::ok() && !stop_cm_thread_)
     {
       cm_executor_->spin_once();
+      // Controllers only load through this executor. Not done in update(): the controller manager
+      // holds this lock during a switch while waiting for update() to run it.
+      if (controller_time_from_sim_)
+      {
+        std::vector<rclcpp::Clock::SharedPtr> clocks;
+        for (const auto &controller : controller_manager_->get_loaded_controllers())
+        {
+          clocks.push_back(controller.c->get_node()->get_clock());
+        }
+        std::lock_guard<std::mutex> lock(controller_clocks_mutex_);
+        controller_clocks_.swap(clocks);
+      }
     }
   };
   cm_thread_ = std::thread(spin);
@@ -292,6 +304,11 @@ void MujocoRos2Control::update()
     {
       rcl_set_ros_time_override(controller_manager_->get_clock()->get_clock_handle(),
                                 sim_time_ros.nanoseconds());
+      std::lock_guard<std::mutex> lock(controller_clocks_mutex_);
+      for (const auto &clock : controller_clocks_)
+      {
+        rcl_set_ros_time_override(clock->get_clock_handle(), sim_time_ros.nanoseconds());
+      }
     }
     controller_manager_->read(sim_time_ros, sim_period);
     controller_manager_->update(sim_time_ros, sim_period);
