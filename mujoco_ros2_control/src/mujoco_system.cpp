@@ -21,6 +21,7 @@
 #include "mujoco_ros2_control/mujoco_system.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <limits>
 #include <memory>
@@ -212,7 +213,9 @@ hardware_interface::return_type MujocoSystem::write(
       {
         double error = joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr];
         mj_data_->qfrc_applied[joint_state.mj_vel_adr] =
-          joint_state.position_pid.computeCommand(error, period.nanoseconds());
+          joint_state.position_pid.computeCommand(
+            error, joint_state.pid_uses_physics_dt ? std::llround(mj_model_->opt.timestep * 1e9)
+                                                   : period.nanoseconds());
       }
       else
       {
@@ -479,6 +482,9 @@ void MujocoSystem::register_joints(
     // Get PID gains, if needed
     if (last_joint_state.is_pid_enabled)
     {
+      const auto physics_dt_it = joint.parameters.find("position_pid_physics_dt");
+      last_joint_state.pid_uses_physics_dt =
+        physics_dt_it != joint.parameters.end() && physics_dt_it->second == "true";
       last_joint_state.position_pid = get_pid_gains(joint, hardware_interface::HW_IF_POSITION);
       last_joint_state.velocity_pid = get_pid_gains(joint, hardware_interface::HW_IF_VELOCITY);
     }
