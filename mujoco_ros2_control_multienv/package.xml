@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model
+  href="http://download.ros.org/schema/package_format3.xsd"
+  schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>mujoco_ros2_control_multienv</name>
+  <version>0.1.0</version>
+  <description>
+    Many mujoco_ros2_control simulations in parallel, each stepped in lockstep with an external
+    process (an RL trainer) through shared memory: a ros2_control bridge controller, the Python
+    client and a launcher that isolates each simulation in its own ROS domain.
+  </description>
+  <maintainer email="johnathancheng0125@gmail.com">wei-hsuan-cheng</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <depend>controller_interface</depend>
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+
+  <exec_depend>mujoco_ros2_control</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

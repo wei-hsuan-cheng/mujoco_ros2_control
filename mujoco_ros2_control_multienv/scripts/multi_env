@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026, Wei-Hsuan Cheng. All rights reserved.
+"""Run N copies of a simulation launch in parallel, one ROS domain each, until Ctrl-C.
+
+  ros2 run mujoco_ros2_control_multienv multi_env --num-envs 8 --shm-name legged_env_{env} \\
+      --compile-model scene.xml:mujocoModelFile -- \\
+      legged_robot_mpc_controller robot.launch.py robotName:=h2 lockstepShmName:=legged_env_{env} ...
+
+"{env}" in a launch argument (or --shm-name) is replaced by the copy's index. Copy i runs with
+ROS_DOMAIN_ID = --domain-id-base + i, e.g. `ROS_DOMAIN_ID=103 ros2 topic list` looks at copy 3.
+"""
+
+import argparse
+import signal
+import time
+from pathlib import Path
+
+from mujoco_ros2_control_multienv import MultiEnvLauncher, compile_model, remove_stale
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--num-envs", type=int, required=True)
+    parser.add_argument("--domain-id-base", type=int, default=100)
+    parser.add_argument("--log-dir", type=Path, default=Path("/tmp/multi_env"))
+    parser.add_argument("--stagger", type=float, default=3.0, help="seconds between starting copies")
+    parser.add_argument("--shm-name", default="", help="lockstep channel name; stale ones are removed first")
+    parser.add_argument("--compile-model", default="", metavar="XML:ARG",
+                        help="compile XML to a .mjb in --log-dir once and pass it as ARG:=<mjb> to every copy")
+    parser.add_argument("launch", nargs=argparse.REMAINDER, help="-- PACKAGE LAUNCH_FILE [ARG:=VALUE ...]")
+    args = parser.parse_args()
+    launch = args.launch[1:] if args.launch[:1] == ["--"] else args.launch
+    if len(launch) < 2:
+        parser.error("give the launch to copy after --: PACKAGE LAUNCH_FILE [ARG:=VALUE ...]")
+    if args.compile_model:
+        xml, arg = args.compile_model.rsplit(":", 1)
+        mjb = compile_model(xml, args.log_dir / (Path(xml).stem + ".mjb"))
+        launch.append(f"{arg}:={mjb}")
+    names = [args.shm_name.replace("{env}", str(i)) for i in range(args.num_envs)] if args.shm_name else []
+    remove_stale(names)
+
+    launcher = MultiEnvLauncher(args.num_envs, launch, args.log_dir, args.domain_id_base, args.stagger)
+    stop = []
+    signal.signal(signal.SIGINT, lambda *_: stop.append(True))
+    signal.signal(signal.SIGTERM, lambda *_: stop.append(True))
+    launcher.start()
+    print(f"{args.num_envs} copies running, ROS domains {args.domain_id_base}..{args.domain_id_base + args.num_envs - 1}, "
+          f"logs in {args.log_dir}; Ctrl-C stops them.", flush=True)
+    exited, up = set(), set()
+    try:
+        while not stop:
+            for i in range(args.num_envs):
+                if i not in exited and not launcher.alive(i):
+                    print(f"copy {i} exited; see {args.log_dir / f'env_{i}.log'}", flush=True)
+                    exited.add(i)
+                if names and i not in up and Path("/dev/shm", names[i]).exists():
+                    print(f"copy {i}: lockstep channel /dev/shm/{names[i]} is up", flush=True)
+                    up.add(i)
+            time.sleep(1.0)
+    finally:
+        launcher.stop()
+
+
+if __name__ == "__main__":
+    main()

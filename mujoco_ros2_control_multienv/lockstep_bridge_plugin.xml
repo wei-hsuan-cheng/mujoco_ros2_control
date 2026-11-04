@@ -1,0 +1,10 @@
+<library path="lockstep_bridge_controller">
+  <class name="mujoco_ros2_control_multienv/LockstepBridgeController"
+         type="mujoco_ros2_control_multienv::LockstepBridgeController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Blocks the controller manager every step_period until an external client answers through
+      shared memory: claimed state interfaces out, claimed command interfaces in.
+    </description>
+  </class>
+</library>
