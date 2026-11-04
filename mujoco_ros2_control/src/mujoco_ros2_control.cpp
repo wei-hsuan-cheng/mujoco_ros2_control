@@ -276,12 +276,11 @@ void MujocoRos2Control::init()
 
 void MujocoRos2Control::update()
 {
-  // Get the simulation time and period
-  auto sim_time = mj_data_->time;
-  int sim_time_sec = static_cast<int>(sim_time);
-  int sim_time_nanosec = static_cast<int>((sim_time - sim_time_sec) * 1000000000);
-
-  rclcpp::Time sim_time_ros(sim_time_sec, sim_time_nanosec, RCL_ROS_TIME);
+  // Get the simulation time and period. Rounded to the nanosecond, not truncated: mj_data->time
+  // accumulates the timestep in floating point, so 0.001 s can read 999999 ns, which is short of
+  // the control period - the update then slipped by a physics step and that control period came
+  // out 1.5 ms long.
+  rclcpp::Time sim_time_ros(static_cast<int64_t>(std::llround(mj_data_->time * 1e9)), RCL_ROS_TIME);
   rclcpp::Duration sim_period = sim_time_ros - last_update_sim_time_ros_;
   publish_this_step_ = should_publish(sim_time_ros);
 
