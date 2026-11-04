@@ -241,5 +241,15 @@ install(TARGETS
   mujoco_ros2_control_node
   DESTINATION lib/${PROJECT_NAME})
 
+# MJCF -> .mjb, so parallel simulations load the compiled model instead of each compiling the XML.
+add_executable(mujoco_compile_model src/mujoco_compile_model.cpp)
+target_link_libraries(mujoco_compile_model ${MUJOCO_LIB})
+target_include_directories(mujoco_compile_model PRIVATE ${MUJOCO_INCLUDE_DIR})
+# The MuJoCo headers need C++17 (std::byte); the other targets get it from rclcpp.
+target_compile_features(mujoco_compile_model PRIVATE cxx_std_17)
+install(TARGETS
+  mujoco_compile_model
+  DESTINATION lib/${PROJECT_NAME})
+
 pluginlib_export_plugin_description_file(mujoco_ros2_control mujoco_system_plugins.xml)
 ament_package()

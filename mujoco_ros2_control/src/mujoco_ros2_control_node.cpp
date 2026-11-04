@@ -51,13 +51,15 @@ int main(int argc, const char **argv)
   node->get_parameter_or("mujoco_wait_to_start", mujoco_wait_to_start, false);
   double mujoco_real_time_factor = 1.0;
   node->get_parameter_or("mujoco_real_time_factor", mujoco_real_time_factor, 1.0);
+  // 0 runs unpaced, as fast as the controllers allow: for lockstep training, where an
+  // external trainer and synchronous controllers set the pace, not the wall clock.
   if (
     !std::isfinite(mujoco_real_time_factor) ||
-    mujoco_real_time_factor <= 0.0)
+    mujoco_real_time_factor < 0.0)
   {
     RCLCPP_FATAL(
       node->get_logger(),
-      "mujoco_real_time_factor must be finite and greater than 0.0, got %.6f",
+      "mujoco_real_time_factor must be finite and >= 0.0 (0 = unpaced), got %.6f",
       mujoco_real_time_factor);
     rclcpp::shutdown();
     return 1;
@@ -123,9 +125,10 @@ int main(int argc, const char **argv)
   const mjtNum simulation_time_start = mujoco_data->time;
   mjtNum next_pacing_time = simulation_time_start + pacing_interval;
 
+  const bool paced = mujoco_real_time_factor > 0.0;
   auto update_simulation = [&]() {
     mujoco_control.update();
-    if (mujoco_data->time < next_pacing_time)
+    if (!paced || mujoco_data->time < next_pacing_time)
     {
       return;
     }
@@ -139,9 +142,16 @@ int main(int argc, const char **argv)
     next_pacing_time = mujoco_data->time + pacing_interval;
   };
 
-  RCLCPP_INFO(
-    node->get_logger(), "MuJoCo real-time pacing enabled (target RTF: %.3f)",
-    mujoco_real_time_factor);
+  if (paced)
+  {
+    RCLCPP_INFO(
+      node->get_logger(), "MuJoCo real-time pacing enabled (target RTF: %.3f)",
+      mujoco_real_time_factor);
+  }
+  else
+  {
+    RCLCPP_INFO(node->get_logger(), "MuJoCo runs unpaced (mujoco_real_time_factor: 0)");
+  }
 
   if (mujoco_headless)
   {
