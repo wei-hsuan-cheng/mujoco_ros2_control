@@ -276,11 +276,15 @@ void MujocoRos2Control::init()
 
 void MujocoRos2Control::update()
 {
-  // Get the simulation time and period. Rounded to the nanosecond, not truncated: mj_data->time
+  // Get the simulation time and period, snapped to the physics-step grid. mj_data->time
   // accumulates the timestep in floating point, so 0.001 s can read 999999 ns, which is short of
-  // the control period - the update then slipped by a physics step and that control period came
-  // out 1.5 ms long.
-  rclcpp::Time sim_time_ros(static_cast<int64_t>(std::llround(mj_data_->time * 1e9)), RCL_ROS_TIME);
+  // the control period - the update then slips by a physics step and that control period comes
+  // out 1.5 ms long. Rounding to the nanosecond is not enough: the accumulated error passes 1 ns
+  // after ~170 s of 0.5 ms steps and reaches ~20 ns by 1000 s.
+  const double timestep = mj_model_->opt.timestep;
+  const int64_t sim_time_ns =
+      std::llround(mj_data_->time / timestep) * static_cast<int64_t>(std::llround(timestep * 1e9));
+  rclcpp::Time sim_time_ros(sim_time_ns, RCL_ROS_TIME);
   rclcpp::Duration sim_period = sim_time_ros - last_update_sim_time_ros_;
   publish_this_step_ = should_publish(sim_time_ros);
 
@@ -650,7 +654,13 @@ void MujocoRos2Control::apply_external_wrenches()
 {
   if (!external_wrench_enabled_) return;
 
-  mju_zero(mj_data_->xfrc_applied, 6 * mj_model_->nbody);
+  // Clear only what this wrote last step: other sources (an RL episode push) write
+  // xfrc_applied too, between physics steps.
+  for (const int body_id : external_wrench_bodies_)
+  {
+    std::fill_n(mj_data_->xfrc_applied + 6 * body_id, 6, static_cast<mjtNum>(0));
+  }
+  external_wrench_bodies_.clear();
 
   std::vector<PendingExternalWrench> pending_commands;
   {
@@ -701,6 +711,7 @@ void MujocoRos2Control::apply_external_wrenches()
     {
       mj_data_->xfrc_applied[6 * it->first + i] = world_wrench[static_cast<size_t>(i)];
     }
+    external_wrench_bodies_.push_back(it->first);
 
     std::array<mjtNum, 6> body_wrench{};
     transform_world_wrench_to_body(it->first, world_wrench, body_wrench);

@@ -10,14 +10,15 @@
 // physics is identical; it is tied to the MuJoCo version that wrote it.
 
 #include <cstdio>
+#include <cstdlib>
 
 #include "mujoco/mujoco.h"
 
 int main(int argc, char ** argv)
 {
-  if (argc != 3)
+  if (argc != 3 && argc != 4)
   {
-    std::fprintf(stderr, "usage: %s <model.xml> <model.mjb>\n", argv[0]);
+    std::fprintf(stderr, "usage: %s <model.xml> <model.mjb> [friction_scale]\n", argv[0]);
     return 2;
   }
   char error[1000] = "";
@@ -30,6 +31,15 @@ int main(int argc, char ** argv)
   if (error[0] != '\0')
   {
     std::fprintf(stderr, "warning while loading %s: %s\n", argv[1], error);
+  }
+  if (argc == 4)
+  {
+    // Every geom's sliding friction x scale: the same as the episode control's friction_scale.
+    const double scale = std::atof(argv[3]);
+    for (int g = 0; g < model->ngeom; ++g)
+    {
+      model->geom_friction[3 * g] *= scale;
+    }
   }
   mj_saveModel(model, argv[2], nullptr, 0);
   mjModel * check = mj_loadModel(argv[2], nullptr);

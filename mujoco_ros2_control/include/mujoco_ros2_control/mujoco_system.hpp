@@ -163,6 +163,54 @@ private:
   void update_body_state_data();
   void update_contact_wrench_data();
   bool register_contact_wrench(const hardware_interface::ComponentInfo &sensor);
+
+  //! Simulation-only episode control for RL training, from a <gpio> with the parameter
+  //! mujoco_episode_control. Command interfaces: snapshot and reset are counters - a new value
+  //! saves, or restores, the full physics state. Applied at a reset, all relative to the snapshot
+  //! and the model as loaded (never compounding over episodes):
+  //!   position.{x,y,z} [m, world]     base offset;
+  //!   yaw [rad]                        rotation of the robot about the vertical through the base;
+  //!   linear_velocity.{x,y,z} [m/s, world], angular_velocity.{x,y,z} [rad/s, base frame];
+  //!   friction_scale                   x every geom's sliding friction;
+  //!   seed                             seeds the draws below, so a reset is reproducible;
+  //!   joint_position_noise [rad], joint_velocity_noise [rad/s]   uniform +- per 1-dof joint;
+  //!   link_mass_scale r                every body's mass and inertia x U(1 - r, 1 + r);
+  //!   payload_mass [kg], payload_com.{x,y,z} [m]   added to / shifting the centre of mass of the
+  //!                                    gpio parameter payload_body (default: the free joint's body).
+  //! push is a counter too: a new value applies push_force.{x,y,z} [N, world] at the payload body's
+  //! centre of mass for push_duration [s], at any time. State interfaces snapshot / reset / push
+  //! echo the last value acted on. Applied in
+  //! post_step(), between two physics steps, so the next one starts from it; the simulation time
+  //! runs on, so controller clocks never go back.
+  struct EpisodeControl
+  {
+    std::string name;
+    double snapshot_command{0.0}, reset_command{0.0}, push_command{0.0};
+    double snapshot_state{0.0}, reset_state{0.0}, push_state{0.0};
+    double position[3]{0.0, 0.0, 0.0};
+    double yaw{0.0};
+    double linear_velocity[3]{0.0, 0.0, 0.0};
+    double angular_velocity[3]{0.0, 0.0, 0.0};
+    double friction_scale{1.0};
+    double seed{0.0};
+    double joint_position_noise{0.0}, joint_velocity_noise{0.0};
+    double link_mass_scale{0.0};
+    double payload_mass{0.0};
+    double payload_com[3]{0.0, 0.0, 0.0};
+    double push_force[3]{0.0, 0.0, 0.0};
+    double push_duration{0.1};
+    double push_end_time{-1.0};  //!< simulation time the active push ends; < 0: none
+    bool has_snapshot{false};
+    std::vector<mjtNum> qpos, qvel, act, qacc_warmstart;
+    std::vector<mjtNum> sliding_friction;          //!< the model's, per geom
+    std::vector<mjtNum> body_mass, body_inertia, body_ipos;  //!< the model's, per body
+    std::vector<int> joint_qpos, joint_dof, joint_id;  //!< 1-dof (hinge / slide) joints
+    int free_qpos{-1}, free_dof{-1}, payload_body{-1};
+  };
+  void register_episode_control(const hardware_interface::HardwareInfo &hardware_info);
+  void apply_episode_control();
+  void reset_episode();
+  std::unique_ptr<EpisodeControl> episode_;  // the interfaces point into it
   void get_joint_limits(
     urdf::JointConstSharedPtr urdf_joint, joint_limits::JointLimits &joint_limits);
   control_toolbox::Pid get_pid_gains(

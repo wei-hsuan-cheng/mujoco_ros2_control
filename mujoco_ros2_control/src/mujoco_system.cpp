@@ -25,6 +25,7 @@
 #include <cctype>
 #include <limits>
 #include <memory>
+#include <random>
 
 #include "ament_index_cpp/get_package_share_directory.hpp"
 
@@ -297,6 +298,7 @@ bool MujocoSystem::init_sim(
 
   register_joints(urdf_model, hardware_info);
   register_sensors(urdf_model, hardware_info);
+  register_episode_control(hardware_info);
 
   set_initial_pose();
   return true;
@@ -973,7 +975,264 @@ bool MujocoSystem::register_contact_wrench(const hardware_interface::ComponentIn
   return true;
 }
 
-void MujocoSystem::post_step() { update_contact_wrench_data(); }
+void MujocoSystem::post_step()
+{
+  apply_episode_control();
+  update_contact_wrench_data();
+}
+
+void MujocoSystem::register_episode_control(const hardware_interface::HardwareInfo &hardware_info)
+{
+  for (const auto &gpio : hardware_info.gpios)
+  {
+    if (gpio.parameters.find("mujoco_episode_control") == gpio.parameters.end())
+    {
+      continue;
+    }
+    episode_ = std::make_unique<EpisodeControl>();
+    auto &e = *episode_;
+    e.name = gpio.name;
+    for (int j = 0; j < mj_model_->njnt; ++j)
+    {
+      if (mj_model_->jnt_type[j] == mjJNT_FREE)
+      {
+        e.free_qpos = mj_model_->jnt_qposadr[j];
+        e.free_dof = mj_model_->jnt_dofadr[j];
+        break;
+      }
+    }
+    e.sliding_friction.resize(static_cast<size_t>(mj_model_->ngeom));
+    for (int g = 0; g < mj_model_->ngeom; ++g)
+    {
+      e.sliding_friction[static_cast<size_t>(g)] = mj_model_->geom_friction[3 * g];
+    }
+    for (int j = 0; j < mj_model_->njnt; ++j)
+    {
+      if (mj_model_->jnt_type[j] == mjJNT_HINGE || mj_model_->jnt_type[j] == mjJNT_SLIDE)
+      {
+        e.joint_qpos.push_back(mj_model_->jnt_qposadr[j]);
+        e.joint_dof.push_back(mj_model_->jnt_dofadr[j]);
+        e.joint_id.push_back(j);
+      }
+    }
+    e.body_mass.assign(mj_model_->body_mass, mj_model_->body_mass + mj_model_->nbody);
+    e.body_inertia.assign(mj_model_->body_inertia, mj_model_->body_inertia + 3 * mj_model_->nbody);
+    e.body_ipos.assign(mj_model_->body_ipos, mj_model_->body_ipos + 3 * mj_model_->nbody);
+    const auto payload = gpio.parameters.find("payload_body");
+    if (payload != gpio.parameters.end())
+    {
+      e.payload_body = mj_name2id(mj_model_, mjOBJ_BODY, payload->second.c_str());
+      if (e.payload_body < 0)
+      {
+        RCLCPP_ERROR(logger_, "episode control %s: no body '%s' for the payload", gpio.name.c_str(),
+                     payload->second.c_str());
+      }
+    }
+    else
+    {
+      for (int j = 0; j < mj_model_->njnt; ++j)
+      {
+        if (mj_model_->jnt_type[j] == mjJNT_FREE)
+        {
+          e.payload_body = mj_model_->jnt_bodyid[j];
+          break;
+        }
+      }
+    }
+    for (const auto &command : gpio.command_interfaces)
+    {
+      double *value = nullptr;
+      const auto &n = command.name;
+      if (n == "snapshot") value = &e.snapshot_command;
+      else if (n == "reset") value = &e.reset_command;
+      else if (n == "push") value = &e.push_command;
+      else if (n == "position.x") value = &e.position[0];
+      else if (n == "position.y") value = &e.position[1];
+      else if (n == "position.z") value = &e.position[2];
+      else if (n == "yaw") value = &e.yaw;
+      else if (n == "linear_velocity.x") value = &e.linear_velocity[0];
+      else if (n == "linear_velocity.y") value = &e.linear_velocity[1];
+      else if (n == "linear_velocity.z") value = &e.linear_velocity[2];
+      else if (n == "angular_velocity.x") value = &e.angular_velocity[0];
+      else if (n == "angular_velocity.y") value = &e.angular_velocity[1];
+      else if (n == "angular_velocity.z") value = &e.angular_velocity[2];
+      else if (n == "friction_scale") value = &e.friction_scale;
+      else if (n == "seed") value = &e.seed;
+      else if (n == "joint_position_noise") value = &e.joint_position_noise;
+      else if (n == "joint_velocity_noise") value = &e.joint_velocity_noise;
+      else if (n == "link_mass_scale") value = &e.link_mass_scale;
+      else if (n == "payload_mass") value = &e.payload_mass;
+      else if (n == "payload_com.x") value = &e.payload_com[0];
+      else if (n == "payload_com.y") value = &e.payload_com[1];
+      else if (n == "payload_com.z") value = &e.payload_com[2];
+      else if (n == "push_force.x") value = &e.push_force[0];
+      else if (n == "push_force.y") value = &e.push_force[1];
+      else if (n == "push_force.z") value = &e.push_force[2];
+      else if (n == "push_duration") value = &e.push_duration;
+      if (value)
+      {
+        command_interfaces_.emplace_back(gpio.name, n, value);
+      }
+      else
+      {
+        RCLCPP_ERROR(logger_, "episode control %s: unknown command interface %s", gpio.name.c_str(), n.c_str());
+      }
+    }
+    for (const auto &state : gpio.state_interfaces)
+    {
+      if (state.name == "snapshot") state_interfaces_.emplace_back(gpio.name, state.name, &e.snapshot_state);
+      else if (state.name == "reset") state_interfaces_.emplace_back(gpio.name, state.name, &e.reset_state);
+      else if (state.name == "push") state_interfaces_.emplace_back(gpio.name, state.name, &e.push_state);
+      else RCLCPP_ERROR(logger_, "episode control %s: unknown state interface %s", gpio.name.c_str(), state.name.c_str());
+    }
+    RCLCPP_INFO(logger_, "episode control '%s': snapshot / reset of the physics state%s", gpio.name.c_str(),
+                e.free_dof < 0 ? " (no free joint: no base twist)" : "");
+    return;
+  }
+}
+
+void MujocoSystem::apply_episode_control()
+{
+  if (!episode_)
+  {
+    return;
+  }
+  auto &e = *episode_;
+  const auto copy = [](const mjtNum *from, int n, std::vector<mjtNum> &to) { to.assign(from, from + n); };
+  const auto finite = [](double v, double fallback = 0.0) { return std::isfinite(v) ? v : fallback; };
+  if (std::isfinite(e.snapshot_command) && e.snapshot_command != e.snapshot_state)
+  {
+    copy(mj_data_->qpos, mj_model_->nq, e.qpos);
+    copy(mj_data_->qvel, mj_model_->nv, e.qvel);
+    copy(mj_data_->act, mj_model_->na, e.act);
+    copy(mj_data_->qacc_warmstart, mj_model_->nv, e.qacc_warmstart);
+    e.snapshot_state = e.snapshot_command;
+    e.has_snapshot = true;
+    RCLCPP_INFO(logger_, "episode snapshot %.0f at t=%.3f s", e.snapshot_state, mj_data_->time);
+  }
+  if (std::isfinite(e.reset_command) && e.reset_command != e.reset_state)
+  {
+    e.reset_state = e.reset_command;
+    if (!e.has_snapshot)
+    {
+      RCLCPP_ERROR(logger_, "episode reset %.0f before any snapshot: ignored", e.reset_state);
+    }
+    else
+    {
+      reset_episode();
+    }
+  }
+  // Pushes: a force at the payload body's centre of mass. Set after this physics step, so the
+  // next steps apply it; MujocoRos2Control's own external wrenches leave this body alone.
+  if (e.payload_body <= 0)
+  {
+    return;
+  }
+  mjtNum *push = mj_data_->xfrc_applied + 6 * e.payload_body;
+  if (std::isfinite(e.push_command) && e.push_command != e.push_state)
+  {
+    e.push_state = e.push_command;
+    e.push_end_time = mj_data_->time + std::max(finite(e.push_duration), 0.0);
+  }
+  if (e.push_end_time >= 0.0)
+  {
+    const bool active = mj_data_->time < e.push_end_time;
+    for (int i = 0; i < 3; ++i)
+    {
+      push[i] = active ? finite(e.push_force[i]) : 0.0;
+      push[3 + i] = 0.0;
+    }
+    if (!active)
+    {
+      e.push_end_time = -1.0;
+    }
+  }
+}
+
+void MujocoSystem::reset_episode()
+{
+  auto &e = *episode_;
+  const auto finite = [](double v, double fallback = 0.0) { return std::isfinite(v) ? v : fallback; };
+  std::mt19937_64 rng(static_cast<uint64_t>(std::llround(std::fabs(finite(e.seed)))));
+  std::uniform_real_distribution<double> uniform(-1.0, 1.0);
+
+  // Model first: mj_setConst runs kinematics at qpos0 in mj_data_, which the snapshot overwrites.
+  const double mass_range = std::clamp(finite(e.link_mass_scale), 0.0, 0.9);
+  for (int b = 1; b < mj_model_->nbody; ++b)
+  {
+    const double s = 1.0 + mass_range * uniform(rng);
+    mj_model_->body_mass[b] = e.body_mass[static_cast<size_t>(b)] * s;
+    for (int k = 0; k < 3; ++k)
+    {
+      mj_model_->body_inertia[3 * b + k] = e.body_inertia[static_cast<size_t>(3 * b + k)] * s;
+      mj_model_->body_ipos[3 * b + k] = e.body_ipos[static_cast<size_t>(3 * b + k)];
+    }
+  }
+  if (e.payload_body > 0)
+  {
+    const int b = e.payload_body;
+    const double mass = mj_model_->body_mass[b];
+    const double payload = std::max(finite(e.payload_mass), -0.5 * mass);
+    mj_model_->body_mass[b] = mass + payload;
+    for (int k = 0; k < 3; ++k)
+    {
+      mj_model_->body_inertia[3 * b + k] *= (mass + payload) / mass;
+      mj_model_->body_ipos[3 * b + k] += finite(e.payload_com[k]);
+    }
+  }
+  const double friction = finite(e.friction_scale, 1.0) > 0.0 ? finite(e.friction_scale, 1.0) : 1.0;
+  for (int g = 0; g < mj_model_->ngeom; ++g)
+  {
+    mj_model_->geom_friction[3 * g] = e.sliding_friction[static_cast<size_t>(g)] * friction;
+  }
+  mj_setConst(mj_model_, mj_data_);
+
+  std::copy(e.qpos.begin(), e.qpos.end(), mj_data_->qpos);
+  std::copy(e.qvel.begin(), e.qvel.end(), mj_data_->qvel);
+  std::copy(e.act.begin(), e.act.end(), mj_data_->act);
+  std::copy(e.qacc_warmstart.begin(), e.qacc_warmstart.end(), mj_data_->qacc_warmstart);
+  const double position_noise = std::max(finite(e.joint_position_noise), 0.0);
+  const double velocity_noise = std::max(finite(e.joint_velocity_noise), 0.0);
+  for (size_t i = 0; i < e.joint_qpos.size(); ++i)
+  {
+    mjtNum &q = mj_data_->qpos[e.joint_qpos[i]];
+    q += position_noise * uniform(rng);
+    const int j = e.joint_id[i];
+    if (mj_model_->jnt_limited[j])
+    {
+      q = std::clamp(q, mj_model_->jnt_range[2 * j], mj_model_->jnt_range[2 * j + 1]);
+    }
+    mj_data_->qvel[e.joint_dof[i]] += velocity_noise * uniform(rng);
+  }
+  if (e.free_qpos >= 0)
+  {
+    mjtNum *base = mj_data_->qpos + e.free_qpos;
+    for (int i = 0; i < 3; ++i)
+    {
+      base[i] += finite(e.position[i]);
+    }
+    // Rotate about the world vertical through the base: q <- q_yaw * q.
+    const double half = 0.5 * finite(e.yaw);
+    const mjtNum yaw[4] = {std::cos(half), 0.0, 0.0, std::sin(half)};
+    mjtNum rotated[4];
+    mju_mulQuat(rotated, yaw, base + 3);
+    mju_normalize4(rotated);
+    mju_copy4(base + 3, rotated);
+  }
+  if (e.free_dof >= 0)
+  {
+    for (int i = 0; i < 3; ++i)
+    {
+      mj_data_->qvel[e.free_dof + i] = finite(e.linear_velocity[i]);       // world frame
+      mj_data_->qvel[e.free_dof + 3 + i] = finite(e.angular_velocity[i]);  // body frame
+    }
+  }
+  mju_zero(mj_data_->qfrc_applied, mj_model_->nv);
+  mju_zero(mj_data_->xfrc_applied, 6 * mj_model_->nbody);
+  e.push_end_time = -1.0;
+  mj_forward(mj_model_, mj_data_);
+  update_body_state_data();
+}
 
 void MujocoSystem::update_contact_wrench_data()
 {

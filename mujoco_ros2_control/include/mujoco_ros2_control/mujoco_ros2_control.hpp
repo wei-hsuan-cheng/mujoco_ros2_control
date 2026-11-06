@@ -140,6 +140,7 @@ private:
   std::mutex external_wrench_mutex_;
   std::vector<PendingExternalWrench> pending_external_wrenches_;
   std::unordered_map<int, ActiveExternalWrench> active_external_wrenches_;
+  std::vector<int> external_wrench_bodies_;  //!< bodies whose xfrc_applied this set last step
 
   // Free bodies queued by ~/reset_objects, applied by the physics thread in update().
   rclcpp::Service<diagnostic_msgs::srv::AddDiagnostics>::SharedPtr reset_objects_srv_;

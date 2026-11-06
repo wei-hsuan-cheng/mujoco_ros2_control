@@ -227,9 +227,17 @@ class LockstepVecEnv:
         return self._collect(timeout)
 
     def step(self, actions, timeout=None):
+        self.step_async(actions)
+        return self.step_wait(timeout)
+
+    def step_async(self, actions):
+        """Answer every environment; they simulate the next step while the caller does other work
+        (e.g. gradient updates). Then step_wait()."""
         actions = np.asarray(actions, dtype=np.float64).reshape(self.num_envs, len(self.act_names))
         for channel, action in zip(self.channels, actions):
             channel.answer(action)
+
+    def step_wait(self, timeout=None):
         return self._collect(timeout)
 
     @property

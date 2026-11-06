@@ -17,7 +17,7 @@ from pathlib import Path
 from ament_index_python.packages import get_package_prefix
 
 
-def compile_model(xml_path, mjb_path):
+def compile_model(xml_path, mjb_path, friction_scale=None):
     """MJCF -> .mjb with mujoco_ros2_control's compiler, for simulations to load directly.
 
     A meshed humanoid costs ~280 MB per process to compile from XML and ~55 MB to load
@@ -25,7 +25,8 @@ def compile_model(xml_path, mjb_path):
     """
     tool = Path(get_package_prefix("mujoco_ros2_control")) / "lib/mujoco_ros2_control/mujoco_compile_model"
     Path(mjb_path).parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run([str(tool), str(xml_path), str(mjb_path)], check=True)
+    extra = [] if friction_scale is None else [str(friction_scale)]
+    subprocess.run([str(tool), str(xml_path), str(mjb_path)] + extra, check=True)
     return Path(mjb_path)
 
 
