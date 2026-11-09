@@ -212,10 +212,15 @@ hardware_interface::return_type MujocoSystem::write(
       if (joint_state.is_pid_enabled)
       {
         double error = joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr];
-        mj_data_->qfrc_applied[joint_state.mj_vel_adr] =
-          joint_state.position_pid.computeCommand(
-            error, joint_state.pid_uses_physics_dt ? std::llround(mj_model_->opt.timestep * 1e9)
-                                                   : period.nanoseconds());
+        double tau = joint_state.position_pid.computeCommand(
+          error, joint_state.pid_uses_physics_dt ? std::llround(mj_model_->opt.timestep * 1e9)
+                                                 : period.nanoseconds());
+        if (joint_state.pid_effort_limited)
+        {
+          tau = clamp(
+            tau, -joint_state.joint_limits.max_effort, joint_state.joint_limits.max_effort);
+        }
+        mj_data_->qfrc_applied[joint_state.mj_vel_adr] = tau;
       }
       else
       {
@@ -485,6 +490,17 @@ void MujocoSystem::register_joints(
       const auto physics_dt_it = joint.parameters.find("position_pid_physics_dt");
       last_joint_state.pid_uses_physics_dt =
         physics_dt_it != joint.parameters.end() && physics_dt_it->second == "true";
+      const auto effort_limit_it = joint.parameters.find("position_pid_effort_limit");
+      last_joint_state.pid_effort_limited =
+        effort_limit_it != joint.parameters.end() && effort_limit_it->second == "true";
+      if (last_joint_state.pid_effort_limited && !(last_joint_state.joint_limits.max_effort > 0.0))
+      {
+        RCLCPP_WARN_STREAM(
+          logger_, "position_pid_effort_limit is set for joint '"
+                     << joint.name
+                     << "', but its URDF joint has no effort limit; the PID output is not clamped.");
+        last_joint_state.pid_effort_limited = false;
+      }
       last_joint_state.position_pid = get_pid_gains(joint, hardware_interface::HW_IF_POSITION);
       last_joint_state.velocity_pid = get_pid_gains(joint, hardware_interface::HW_IF_VELOCITY);
     }

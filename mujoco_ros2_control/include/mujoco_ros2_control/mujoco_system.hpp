@@ -83,6 +83,10 @@ public:
     // position_pid_physics_dt: integrate and differentiate the position PID over the physics step it
     // runs at, instead of the time since the last controller update. Gains then mean what they say.
     bool pid_uses_physics_dt{false};
+    // position_pid_effort_limit: clamp the position PID's output to the URDF effort limit, as a real
+    // actuator saturates. Without it a blocked joint (a collision, a joint pushed against an
+    // obstacle) is driven with whatever torque the error and the integral ask for.
+    bool pid_effort_limited{false};
     // effort_pd: per-physics-step joint servo tau = pd_kp*(q_des-q) + pd_kd*(qd_des-qd) + effort_command.
     // pd_kp / pd_kd start at the effort_pd_kp / effort_pd_kd joint parameters and are also the "kp" /
     // "kd" command interfaces when the joint declares them, so a controller can set them per joint
