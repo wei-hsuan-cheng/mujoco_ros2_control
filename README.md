@@ -58,6 +58,17 @@ ros2 run mujoco_ros2_control_demos example_diff_drive
 
 See the [documentation](doc/index.rst) for usage.
 
+
+### Floating-Base Feedback Frames
+
+Body-state hardware interfaces and ground-truth odometry report pose at the regular link origin, with twist expressed in that link's local axes.
+Both paths use `mj_objectVelocity(..., mjOBJ_XBODY, ..., 1)` to match the published `xpos/xquat` pose.
+MuJoCo's `mjOBJ_BODY` instead uses the center of mass and principal-inertia axes for local velocity output, which can differ substantially from the robot link frame.
+Using BODY twist with link pose can therefore corrupt angular feedback even when the rendered model and positions look correct.
+See the [MuJoCo source](https://github.com/google-deepmind/mujoco/blob/3.3.2/src/engine/engine_support.c#L1166) and the regression test in `mujoco_ros2_control/tests/test_body_twist_frames.py`.
+With Python MuJoCo and NumPy installed, run `python3 -m unittest discover -s mujoco_ros2_control/tests -v` from this repository.
+
+
 ## Docker
 
 A basic containerized workflow is provided to test this package in isolation.

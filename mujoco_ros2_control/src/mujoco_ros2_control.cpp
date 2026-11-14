@@ -1033,9 +1033,9 @@ void MujocoRos2Control::publish_ground_truth(const rclcpp::Time &stamp)
     odom.pose.pose.orientation.z = mj_data_->xquat[4 * body_id + 3];
 
     mjtNum vel6[6] = {0};
-    // Returns 6D velocity as (angular, linear) about object center.
-    // flg_local=1 expresses vectors in the body's local frame, matching Odometry child frame.
-    mj_objectVelocity(mj_model_, mj_data_, mjOBJ_BODY, body_id, vel6, /*flg_local=*/1);
+    // XBODY returns (angular, linear) at the link origin in the child frame,
+    // matching xpos/xquat above; BODY would use the COM and principal-inertia axes.
+    mj_objectVelocity(mj_model_, mj_data_, mjOBJ_XBODY, body_id, vel6, /*flg_local=*/1);
 
     odom.twist.twist.angular.x = vel6[0];
     odom.twist.twist.angular.y = vel6[1];

@@ -1084,7 +1084,8 @@ void MujocoSystem::update_body_state_data()
     data.orientation.normalize();
 
     mjtNum vel6[6] = {0};
-    mj_objectVelocity(mj_model_, mj_data_, mjOBJ_BODY, body_id, vel6, /*flg_local=*/1);
+    // XBODY matches xpos/xquat: BODY would use the COM and principal-inertia axes.
+    mj_objectVelocity(mj_model_, mj_data_, mjOBJ_XBODY, body_id, vel6, /*flg_local=*/1);
     data.angular_velocity.x() = vel6[0];
     data.angular_velocity.y() = vel6[1];
     data.angular_velocity.z() = vel6[2];
