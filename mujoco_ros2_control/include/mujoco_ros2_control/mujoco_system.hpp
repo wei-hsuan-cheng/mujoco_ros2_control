@@ -22,7 +22,9 @@
 #define MUJOCO_ROS2_CONTROL__MUJOCO_SYSTEM_HPP_
 
 #include <Eigen/Dense>
+#include <deque>
 #include <memory>
+#include <utility>
 #include <optional>
 #include <string>
 #include <vector>
@@ -58,6 +60,7 @@ public:
     const hardware_interface::HardwareInfo &hardware_info) override;
 
   void post_step() override;
+  void set_delays(double sensing, double actuation) override;
 
   struct JointState
   {
@@ -187,6 +190,17 @@ private:
   mjModel *mj_model_;
   mjData *mj_data_;
   bool use_actuator_effort_command_{false};
+
+  // Plant-side delays (set_delays): snapshots of what read() reports and of the commands write() applies, by sim time.
+  using Snapshots = std::deque<std::pair<double, std::vector<double>>>;
+  std::vector<double> sensed_values() const;
+  void set_sensed_values(const std::vector<double> &values);
+  std::vector<double> command_values() const;
+  void set_command_values(const std::vector<double> &values);
+  double sensing_delay_{0.0};
+  double actuation_delay_{0.0};
+  Snapshots sensing_snapshots_;
+  Snapshots actuation_snapshots_;
 
   rclcpp::Logger logger_;  // TODO(sangteak601): delete?
 };

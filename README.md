@@ -69,6 +69,27 @@ See the [MuJoCo source](https://github.com/google-deepmind/mujoco/blob/3.3.2/src
 With Python MuJoCo and NumPy installed, run `python3 -m unittest discover -s mujoco_ros2_control/tests -v` from this repository.
 
 
+### Plant Modeling Errors
+
+For controller robustness studies, the node can perturb the simulated robot without any extra model files: it loads the
+nominal MJCF, then applies a YAML `model_error` map to the compiled model in memory and recomputes the derived
+constants (`mj_setConst`) before the simulation starts.
+The controller keeps its own nominal model, so the difference is a modeling error.
+
+| Node parameter | Meaning |
+| --- | --- |
+| `model_error_file` | YAML with a `model_error` map; empty: the nominal plant |
+| `model_error_seed` | Seed for the random draws; overrides the file's `seed` when >= 0 |
+| `model_error_report` | Optional JSON path for every realized value (per body, joint and geom, before and after) |
+
+The map can perturb body mass, CoM and principal inertia (`inertia`), joint Coulomb friction, damping and armature
+(`joint_friction`), the sliding friction of every geom (`contact_friction`), replace the floor's friction by a grid of
+patches with their own friction (`ground_regions`, added through MuJoCo's `mjSpec` while loading) and delay what the
+hardware plugin reports and applies (`delay: {sensing, actuation}`, in seconds; the joint servo keeps the live state).
+Each value is a fixed relative change, `{uniform: [lo, hi]}` drawn per element from the seed, or `{value: v}`; the
+format is documented in `include/mujoco_ros2_control/model_error.hpp`.
+
+
 ## Docker
 
 A basic containerized workflow is provided to test this package in isolation.

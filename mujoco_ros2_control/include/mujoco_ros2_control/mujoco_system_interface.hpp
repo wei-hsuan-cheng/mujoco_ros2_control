@@ -43,6 +43,10 @@ public:
   /// not solved yet, so anything derived from contact forces must be captured here.
   virtual void post_step() {}
 
+  /// Plant-side delays for robustness studies (model_error.hpp): what read() reports is `sensing` seconds old and the
+  /// commands write() applies are `actuation` seconds old. Zero (the default) is the undelayed simulator.
+  virtual void set_delays(double /* sensing */, double /* actuation */) {}
+
 protected:
 };
 }  // namespace mujoco_ros2_control

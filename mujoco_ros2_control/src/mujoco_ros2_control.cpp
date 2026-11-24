@@ -30,6 +30,7 @@
 #include <utility>
 
 #include "mujoco_ros2_control/mujoco_ros2_control.hpp"
+#include "mujoco_ros2_control/model_error.hpp"
 #include "rcl/time.h"
 
 namespace
@@ -182,6 +183,16 @@ void MujocoRos2Control::init()
     {
       RCLCPP_FATAL(logger_, "Could not initialize robot simulation interface");
       return;
+    }
+    // Plant-side sensing and actuation delays from the model-error file (model_error.hpp).
+    std::string model_error_file;
+    int64_t model_error_seed = -1;
+    node_->get_parameter_or("model_error_file", model_error_file, std::string());
+    node_->get_parameter_or("model_error_seed", model_error_seed, int64_t{-1});
+    if (!model_error_file.empty())
+    {
+      const auto delays = read_delays(model_error_file, model_error_seed);
+      mujoco_system->set_delays(delays.sensing, delays.actuation);
     }
 
     sim_systems_.push_back(mujoco_system.get());  // owned by the resource manager from here on

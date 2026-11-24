@@ -91,6 +91,22 @@ std::vector<hardware_interface::CommandInterface> MujocoSystem::export_command_i
   return std::move(command_interfaces_);
 }
 
+namespace
+{
+// Appends the current snapshot and returns the newest one at least `delay` old (the oldest until the buffer is that
+// long); older ones are dropped.
+const std::vector<double> &delayed(
+  std::deque<std::pair<double, std::vector<double>>> &snapshots, double time, double delay, std::vector<double> value)
+{
+  snapshots.emplace_back(time, std::move(value));
+  while (snapshots.size() > 1 && snapshots[1].first <= time - delay)
+  {
+    snapshots.pop_front();
+  }
+  return snapshots.front().second;
+}
+}  // namespace
+
 hardware_interface::return_type MujocoSystem::read(
   const rclcpp::Time & /* time */, const rclcpp::Duration & /* period */)
 {
@@ -142,6 +158,11 @@ hardware_interface::return_type MujocoSystem::read(
 
   update_body_state_data();
 
+  if (sensing_delay_ > 0.0)
+  {
+    set_sensed_values(delayed(sensing_snapshots_, mj_data_->time, sensing_delay_, sensed_values()));
+  }
+
   // Lidar last: it casts against the current kinematics, which mj_step1 has already
   // computed for this step. Guarded: a sensor fault must not escape read() and
   // tear down the simulation, and an exception thrown here would propagate out of
@@ -181,6 +202,14 @@ hardware_interface::return_type MujocoSystem::write(
         joint_state.mimic_multiplier *
         joint_states_.at(joint_state.mimicked_joint_index).effort_command;
     }
+  }
+  // An actuation delay applies the commands of `actuation_delay_` ago; the latest ones are restored afterwards, so the
+  // command interfaces keep what the controller wrote.
+  std::vector<double> latest_commands;
+  if (actuation_delay_ > 0.0)
+  {
+    latest_commands = command_values();
+    set_command_values(delayed(actuation_snapshots_, mj_data_->time, actuation_delay_, latest_commands));
   }
   // Joint states
   for (auto &joint_state : joint_states_)
@@ -268,7 +297,111 @@ hardware_interface::return_type MujocoSystem::write(
       }
     }
   }
+  if (actuation_delay_ > 0.0)
+  {
+    set_command_values(latest_commands);
+  }
   return hardware_interface::return_type::OK;
+}
+
+void MujocoSystem::set_delays(double sensing, double actuation)
+{
+  sensing_delay_ = std::max(0.0, sensing);
+  actuation_delay_ = std::max(0.0, actuation);
+  sensing_snapshots_.clear();
+  actuation_snapshots_.clear();
+  if (sensing_delay_ > 0.0 || actuation_delay_ > 0.0)
+  {
+    RCLCPP_WARN(
+      logger_, "Plant delays: sensing %.4f s, actuation %.4f s (model error)", sensing_delay_, actuation_delay_);
+  }
+}
+
+std::vector<double> MujocoSystem::sensed_values() const
+{
+  std::vector<double> values;
+  for (const auto &joint : joint_states_)
+  {
+    values.insert(values.end(), {joint.position, joint.velocity, joint.effort});
+  }
+  for (const auto &imu : imu_sensor_data_)
+  {
+    const auto &q = imu.orientation.data;
+    const auto &w = imu.angular_velocity.data;
+    const auto &a = imu.linear_acceleration.data;
+    values.insert(values.end(), {q.w(), q.x(), q.y(), q.z(), w.x(), w.y(), w.z(), a.x(), a.y(), a.z()});
+  }
+  for (const auto &ft : ft_sensor_data_)
+  {
+    const auto &f = ft.force.data;
+    const auto &m = ft.torque.data;
+    values.insert(values.end(), {f.x(), f.y(), f.z(), m.x(), m.y(), m.z()});
+  }
+  for (const auto &body : body_state_data_)
+  {
+    const auto &p = body.position;
+    const auto &q = body.orientation;
+    const auto &v = body.linear_velocity;
+    const auto &w = body.angular_velocity;
+    values.insert(values.end(), {p.x(), p.y(), p.z(), q.w(), q.x(), q.y(), q.z(), v.x(), v.y(), v.z(), w.x(), w.y(), w.z()});
+  }
+  return values;
+}
+
+void MujocoSystem::set_sensed_values(const std::vector<double> &values)
+{
+  std::size_t i = 0;
+  for (auto &joint : joint_states_)
+  {
+    joint.position = values[i++];
+    joint.velocity = values[i++];
+    joint.effort = values[i++];
+  }
+  for (auto &imu : imu_sensor_data_)
+  {
+    imu.orientation.data = Eigen::Quaterniond(values[i], values[i + 1], values[i + 2], values[i + 3]);
+    imu.angular_velocity.data = Eigen::Vector3d(values[i + 4], values[i + 5], values[i + 6]);
+    imu.linear_acceleration.data = Eigen::Vector3d(values[i + 7], values[i + 8], values[i + 9]);
+    i += 10;
+  }
+  for (auto &ft : ft_sensor_data_)
+  {
+    ft.force.data = Eigen::Vector3d(values[i], values[i + 1], values[i + 2]);
+    ft.torque.data = Eigen::Vector3d(values[i + 3], values[i + 4], values[i + 5]);
+    i += 6;
+  }
+  for (auto &body : body_state_data_)
+  {
+    body.position = Eigen::Vector3d(values[i], values[i + 1], values[i + 2]);
+    body.orientation = Eigen::Quaterniond(values[i + 3], values[i + 4], values[i + 5], values[i + 6]);
+    body.linear_velocity = Eigen::Vector3d(values[i + 7], values[i + 8], values[i + 9]);
+    body.angular_velocity = Eigen::Vector3d(values[i + 10], values[i + 11], values[i + 12]);
+    i += 13;
+  }
+}
+
+std::vector<double> MujocoSystem::command_values() const
+{
+  std::vector<double> values;
+  for (const auto &joint : joint_states_)
+  {
+    values.insert(
+      values.end(), {joint.position_command, joint.velocity_command, joint.effort_command, joint.pd_kp, joint.pd_kd});
+  }
+  return values;
+}
+
+void MujocoSystem::set_command_values(const std::vector<double> &values)
+{
+  std::size_t i = 0;
+  for (auto &joint : joint_states_)
+  {
+    joint.position_command = values[i++];
+    joint.velocity_command = values[i++];
+    joint.effort_command = values[i++];
+    joint.pd_kp = values[i++];
+    joint.pd_kd = values[i++];
+  }
 }
 
 bool MujocoSystem::init_sim(

@@ -21,12 +21,14 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <thread>
 
 #include "mujoco/mujoco.h"
 #include "rclcpp/rclcpp.hpp"
 #include "std_srvs/srv/trigger.hpp"
 
+#include "mujoco_ros2_control/model_error.hpp"
 #include "mujoco_ros2_control/mujoco_cameras.hpp"
 #include "mujoco_ros2_control/mujoco_rendering.hpp"
 #include "mujoco_ros2_control/mujoco_ros2_control.hpp"
@@ -63,9 +65,26 @@ int main(int argc, const char **argv)
     return 1;
   }
 
+  // Plant-side modeling error (robustness studies): a YAML file perturbs the model in memory (ground patches are
+  // added while loading, the other errors are applied to the compiled model).
+  std::string model_error_file, model_error_report;
+  int64_t model_error_seed = -1;
+  node->get_parameter_or("model_error_file", model_error_file, std::string());
+  node->get_parameter_or("model_error_seed", model_error_seed, int64_t{-1});
+  node->get_parameter_or("model_error_report", model_error_report, std::string());
+
   // load and compile model
   char error[1000] = "Could not load binary model";
-  if (
+  if (!model_error_file.empty()) {
+    try {
+      mujoco_model = mujoco_ros2_control::load_model(model_path, model_error_file);
+    } catch (const std::exception & e) {
+      RCLCPP_FATAL(node->get_logger(), "model error: %s", e.what());
+      rclcpp::shutdown();
+      return 1;
+    }
+  }
+  else if (
     std::strlen(model_path.c_str()) > 4 &&
     !std::strcmp(model_path.c_str() + std::strlen(model_path.c_str()) - 4, ".mjb"))
   {
@@ -81,8 +100,28 @@ int main(int argc, const char **argv)
   }
 
   RCLCPP_INFO_STREAM(node->get_logger(), "Mujoco model has been successfully loaded !");
+
+  if (!model_error_file.empty()) {
+    try {
+      std::string summary;
+      const auto report =
+        mujoco_ros2_control::apply_model_error(mujoco_model, model_error_file, model_error_seed, summary);
+      RCLCPP_WARN_STREAM(node->get_logger(), summary);
+      if (!model_error_report.empty()) {
+        std::ofstream(model_error_report) << report << '\n';
+      }
+    } catch (const std::exception & e) {
+      RCLCPP_FATAL(node->get_logger(), "model error: %s", e.what());
+      rclcpp::shutdown();
+      return 1;
+    }
+  }
+
   // make data
   mujoco_data = mj_makeData(mujoco_model);
+  if (!model_error_file.empty()) {
+    mj_setConst(mujoco_model, mujoco_data);  // derived constants (subtree masses, inverse weights) of the new model
+  }
 
   // initialize mujoco control
   auto mujoco_control = mujoco_ros2_control::MujocoRos2Control(node, mujoco_model, mujoco_data);

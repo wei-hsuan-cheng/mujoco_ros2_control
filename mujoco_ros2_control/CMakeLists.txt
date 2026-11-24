@@ -29,6 +29,7 @@ find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+find_package(yaml-cpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -224,12 +225,13 @@ add_executable(mujoco_ros2_control_node
   src/mujoco_rendering.cpp
   src/mujoco_ros2_control.cpp
   src/mujoco_cameras.cpp
+  src/model_error.cpp
 )
 set_target_properties(mujoco_ros2_control_node
   PROPERTIES OUTPUT_NAME mujoco_ros2_control)
 ament_target_dependencies(mujoco_ros2_control_node ${THIS_PACKAGE_DEPENDS})
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_link_libraries(mujoco_ros2_control_node ${MUJOCO_LIB} glfw "${cpp_typesupport_target}")
+target_link_libraries(mujoco_ros2_control_node ${MUJOCO_LIB} glfw "${cpp_typesupport_target}" yaml-cpp)
 target_include_directories(mujoco_ros2_control_node
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
