@@ -162,6 +162,10 @@ hardware_interface::return_type MujocoSystem::read(
   {
     set_sensed_values(delayed(sensing_snapshots_, mj_data_->time, sensing_delay_, sensed_values()));
   }
+  else
+  {
+    sensing_snapshots_.clear();
+  }
 
   // Lidar last: it casts against the current kinematics, which mj_step1 has already
   // computed for this step. Guarded: a sensor fault must not escape read() and
@@ -210,6 +214,10 @@ hardware_interface::return_type MujocoSystem::write(
   {
     latest_commands = command_values();
     set_command_values(delayed(actuation_snapshots_, mj_data_->time, actuation_delay_, latest_commands));
+  }
+  else
+  {
+    actuation_snapshots_.clear();
   }
   // Joint states
   for (auto &joint_state : joint_states_)
@@ -304,17 +312,12 @@ hardware_interface::return_type MujocoSystem::write(
   return hardware_interface::return_type::OK;
 }
 
+// May change every step (a model error blended in): the buffers are kept, so a growing delay keeps its history as
+// long as it grows slower than time; a zero delay empties its buffer in read() / write().
 void MujocoSystem::set_delays(double sensing, double actuation)
 {
   sensing_delay_ = std::max(0.0, sensing);
   actuation_delay_ = std::max(0.0, actuation);
-  sensing_snapshots_.clear();
-  actuation_snapshots_.clear();
-  if (sensing_delay_ > 0.0 || actuation_delay_ > 0.0)
-  {
-    RCLCPP_WARN(
-      logger_, "Plant delays: sensing %.4f s, actuation %.4f s (model error)", sensing_delay_, actuation_delay_);
-  }
 }
 
 std::vector<double> MujocoSystem::sensed_values() const

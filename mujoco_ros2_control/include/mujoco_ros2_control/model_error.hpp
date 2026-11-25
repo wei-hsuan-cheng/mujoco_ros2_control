@@ -50,6 +50,8 @@ namespace mujoco_ros2_control
 //       friction: {uniform: [-0.5, 0.5]}      # per patch, relative to the floor's; the patch's friction governs its
 //                                             # contacts (higher geom priority than the robot's)
 //     delay: {sensing: 0.005, actuation: 0.005}   # [s] applied by the hardware plugin, see Delays below
+//     onset: request                          # load (default): from the start; request: see Onset below
+//     ramp: 1.0                               # [s] with onset: request, blend the error in over this time
 //
 // load_model() loads the MJCF, adding the ground_regions patches through the model-editing API when the file has them;
 // apply_model_error() then perturbs the compiled model: call it before mj_makeData, then mj_setConst. It returns the
@@ -66,6 +68,22 @@ struct Delays
   double actuation{0.0};
 };
 Delays read_delays(const std::string & file, int64_t seed);
+
+// The `onset` entry: with `onset: request` the simulation starts on the nominal plant (ground patches at the floor's
+// friction, no delays) and the node's ~/apply_model_error service switches the error on, blended in over `ramp`
+// seconds, e.g. once the controller has taken over, so a start-up phase is not part of the study.
+struct Onset
+{
+  bool on_request{false};
+  double ramp{0.0};
+};
+Onset read_onset(const std::string & file);
+
+// Sets every array apply_model_error() perturbs (inertia, joint friction, geom friction and colour) of `model` to
+// nominal + alpha (perturbed - nominal), alpha in [0, 1], and recomputes the derived constants (mj_setConst) with
+// `scratch`, an mjData of the model that is not the simulation's own. The three models must have the same structure.
+// A blend of two physically valid inertias is valid.
+void blend_model(mjModel * model, const mjModel * nominal, const mjModel * perturbed, double alpha, mjData * scratch);
 }  // namespace mujoco_ros2_control
 
 #endif  // MUJOCO_ROS2_CONTROL__MODEL_ERROR_HPP_

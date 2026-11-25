@@ -30,6 +30,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace mujoco_ros2_control
@@ -192,7 +193,7 @@ std::string apply_model_error(mjModel * model, const std::string & file, int64_t
   for (const auto & entry : root) {
     const auto key = entry.first.as<std::string>();
     if (key != "seed" && key != "inertia" && key != "joint_friction" && key != "contact_friction" &&
-        key != "ground_regions" && key != "delay") {
+        key != "ground_regions" && key != "delay" && key != "onset" && key != "ramp") {
       throw std::runtime_error("model_error: unknown entry '" + key + "'");
     }
   }
@@ -364,5 +365,38 @@ Delays read_delays(const std::string & file, int64_t seed)
   delays.sensing = seconds("sensing", 9);
   delays.actuation = seconds("actuation", 10);
   return delays;
+}
+
+Onset read_onset(const std::string & file)
+{
+  Onset onset;
+  const YAML::Node root = YAML::LoadFile(file)["model_error"];
+  const auto mode = root["onset"] ? root["onset"].as<std::string>() : std::string("load");
+  if (mode != "load" && mode != "request") {
+    throw std::runtime_error("model_error onset: expected load or request, got '" + mode + "'");
+  }
+  onset.on_request = mode == "request";
+  onset.ramp = root["ramp"] ? root["ramp"].as<double>() : 0.0;
+  if (!(onset.ramp >= 0.0 && onset.ramp <= 60.0)) throw std::runtime_error("model_error ramp: must lie in [0, 60] s");
+  if (root["ramp"] && !onset.on_request) throw std::runtime_error("model_error ramp: needs onset: request");
+  return onset;
+}
+
+void blend_model(mjModel * model, const mjModel * nominal, const mjModel * perturbed, double alpha, mjData * scratch)
+{
+  alpha = std::clamp(alpha, 0.0, 1.0);
+  const auto mix = [alpha](auto * out, const auto * from, const auto * to, int count) {
+    using T = std::remove_pointer_t<decltype(out)>;
+    for (int i = 0; i < count; ++i) out[i] = static_cast<T>(from[i] + alpha * (to[i] - from[i]));
+  };
+  mix(model->body_mass, nominal->body_mass, perturbed->body_mass, model->nbody);
+  mix(model->body_ipos, nominal->body_ipos, perturbed->body_ipos, 3 * model->nbody);
+  mix(model->body_inertia, nominal->body_inertia, perturbed->body_inertia, 3 * model->nbody);
+  mix(model->dof_frictionloss, nominal->dof_frictionloss, perturbed->dof_frictionloss, model->nv);
+  mix(model->dof_damping, nominal->dof_damping, perturbed->dof_damping, model->nv);
+  mix(model->dof_armature, nominal->dof_armature, perturbed->dof_armature, model->nv);
+  mix(model->geom_friction, nominal->geom_friction, perturbed->geom_friction, 3 * model->ngeom);
+  mix(model->geom_rgba, nominal->geom_rgba, perturbed->geom_rgba, 4 * model->ngeom);
+  mj_setConst(model, scratch);
 }
 }  // namespace mujoco_ros2_control

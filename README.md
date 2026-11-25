@@ -88,6 +88,10 @@ patches with their own friction (`ground_regions`, added through MuJoCo's `mjSpe
 hardware plugin reports and applies (`delay: {sensing, actuation}`, in seconds; the joint servo keeps the live state).
 Each value is a fixed relative change, `{uniform: [lo, hi]}` drawn per element from the seed, or `{value: v}`; the
 format is documented in `include/mujoco_ros2_control/model_error.hpp`.
+With `onset: request` (and `ramp: <seconds>`) in the map, the simulation starts on the nominal plant and the
+`~/apply_model_error` service (`std_srvs/Trigger`) switches the error on, blended in over the ramp between physics
+steps (masses, CoM, inertias, frictions and delays; the derived constants are recomputed each step of the blend), so a
+start-up phase can run on the nominal plant.
 
 
 ## Docker

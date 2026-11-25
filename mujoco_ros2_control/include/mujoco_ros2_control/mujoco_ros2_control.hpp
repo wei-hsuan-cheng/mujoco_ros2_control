@@ -53,6 +53,8 @@ public:
   void init();
   void update();
   void update_controller_manager();
+  // Plant-side sensing and actuation delays of every simulated system [s] (model_error.hpp).
+  void set_delays(double sensing, double actuation);
 
 private:
   struct PendingExternalWrench

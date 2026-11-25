@@ -184,15 +184,21 @@ void MujocoRos2Control::init()
       RCLCPP_FATAL(logger_, "Could not initialize robot simulation interface");
       return;
     }
-    // Plant-side sensing and actuation delays from the model-error file (model_error.hpp).
+    // Plant-side sensing and actuation delays from the model-error file (model_error.hpp); with onset: request the
+    // node sets them when the error is switched on.
     std::string model_error_file;
     int64_t model_error_seed = -1;
     node_->get_parameter_or("model_error_file", model_error_file, std::string());
     node_->get_parameter_or("model_error_seed", model_error_seed, int64_t{-1});
-    if (!model_error_file.empty())
+    if (!model_error_file.empty() && !read_onset(model_error_file).on_request)
     {
       const auto delays = read_delays(model_error_file, model_error_seed);
       mujoco_system->set_delays(delays.sensing, delays.actuation);
+      if (delays.sensing > 0.0 || delays.actuation > 0.0)
+      {
+        RCLCPP_WARN(
+          logger_, "Plant delays: sensing %.4f s, actuation %.4f s (model error)", delays.sensing, delays.actuation);
+      }
     }
 
     sim_systems_.push_back(mujoco_system.get());  // owned by the resource manager from here on
@@ -351,6 +357,14 @@ void MujocoRos2Control::update_controller_manager()
   controller_manager_->read(sim_time, zero_period);
   controller_manager_->update(sim_time, zero_period);
   controller_manager_->write(sim_time, zero_period);
+}
+
+void MujocoRos2Control::set_delays(double sensing, double actuation)
+{
+  for (auto *system : sim_systems_)
+  {
+    system->set_delays(sensing, actuation);
+  }
 }
 
 void MujocoRos2Control::init_publish_rate()

@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -101,14 +102,28 @@ int main(int argc, const char **argv)
 
   RCLCPP_INFO_STREAM(node->get_logger(), "Mujoco model has been successfully loaded !");
 
+  // With onset: request the simulation starts on the nominal model; the perturbed one is kept to blend in later.
+  mujoco_ros2_control::Onset onset;
+  mujoco_ros2_control::Delays delays;
+  mjModel * nominal_model = nullptr;
+  mjModel * perturbed_model = nullptr;
   if (!model_error_file.empty()) {
     try {
+      onset = mujoco_ros2_control::read_onset(model_error_file);
+      delays = mujoco_ros2_control::read_delays(model_error_file, model_error_seed);
+      if (onset.on_request) {
+        nominal_model = mj_copyModel(nullptr, mujoco_model);
+      }
       std::string summary;
       const auto report =
         mujoco_ros2_control::apply_model_error(mujoco_model, model_error_file, model_error_seed, summary);
-      RCLCPP_WARN_STREAM(node->get_logger(), summary);
+      RCLCPP_WARN_STREAM(
+        node->get_logger(), summary << (onset.on_request ? " (switched on by ~/apply_model_error)" : ""));
       if (!model_error_report.empty()) {
         std::ofstream(model_error_report) << report << '\n';
+      }
+      if (onset.on_request) {
+        perturbed_model = mj_copyModel(nullptr, mujoco_model);
       }
     } catch (const std::exception & e) {
       RCLCPP_FATAL(node->get_logger(), "model error: %s", e.what());
@@ -119,7 +134,11 @@ int main(int argc, const char **argv)
 
   // make data
   mujoco_data = mj_makeData(mujoco_model);
-  if (!model_error_file.empty()) {
+  mjData * scratch_data = nullptr;  // for mj_setConst while the simulation runs
+  if (onset.on_request) {
+    scratch_data = mj_makeData(mujoco_model);
+    mujoco_ros2_control::blend_model(mujoco_model, nominal_model, perturbed_model, 0.0, scratch_data);
+  } else if (!model_error_file.empty()) {
     mj_setConst(mujoco_model, mujoco_data);  // derived constants (subtree masses, inverse weights) of the new model
   }
 
@@ -139,6 +158,23 @@ int main(int argc, const char **argv)
       const bool was_started = simulation_started.exchange(true);
       response->success = true;
       response->message = was_started ? "MuJoCo is already running" : "MuJoCo simulation started";
+    });
+
+  // Switches a deferred model error on (onset: request); the simulation loop blends it in between steps.
+  std::atomic_bool onset_requested{false};
+  auto onset_service = node->create_service<std_srvs::srv::Trigger>(
+    "~/apply_model_error",
+    [&onset_requested, &onset](
+      const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+      std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+      if (!onset.on_request) {
+        response->success = false;
+        response->message = "no deferred model error (model_error_file with onset: request)";
+        return;
+      }
+      const bool was_requested = onset_requested.exchange(true);
+      response->success = true;
+      response->message = was_requested ? "model error already switched on" : "model error switched on";
     });
 
   auto node_executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
@@ -162,7 +198,25 @@ int main(int argc, const char **argv)
   const mjtNum simulation_time_start = mujoco_data->time;
   mjtNum next_pacing_time = simulation_time_start + pacing_interval;
 
+  mjtNum onset_time = -1.0;
+  bool onset_complete = false;
   auto update_simulation = [&]() {
+    if (onset_requested.load() && !onset_complete) {
+      if (onset_time < 0.0) {
+        onset_time = mujoco_data->time;
+        RCLCPP_WARN(
+          node->get_logger(), "Model error switched on at %.3f s, blended in over %.2f s", onset_time, onset.ramp);
+      }
+      const double alpha = onset.ramp > 0.0 ? std::min(1.0, (mujoco_data->time - onset_time) / onset.ramp) : 1.0;
+      mujoco_ros2_control::blend_model(mujoco_model, nominal_model, perturbed_model, alpha, scratch_data);
+      mujoco_control.set_delays(alpha * delays.sensing, alpha * delays.actuation);
+      if (alpha >= 1.0) {
+        onset_complete = true;
+        RCLCPP_WARN(
+          node->get_logger(), "Model error fully applied at %.3f s (plant delays: sensing %.4f s, actuation %.4f s)",
+          mujoco_data->time, delays.sensing, delays.actuation);
+      }
+    }
     mujoco_control.update();
     if (mujoco_data->time < next_pacing_time)
     {
@@ -238,6 +292,11 @@ int main(int argc, const char **argv)
   // free MuJoCo model and data
   mj_deleteData(mujoco_data);
   mj_deleteModel(mujoco_model);
+  if (onset.on_request) {
+    mj_deleteData(scratch_data);
+    mj_deleteModel(nominal_model);
+    mj_deleteModel(perturbed_model);
+  }
 
   return 1;
 }
