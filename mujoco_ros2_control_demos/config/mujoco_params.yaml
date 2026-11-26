@@ -3,6 +3,8 @@ mujoco_ros2_control:
     # MuJoCo viewer camera (used by mujoco_ros2_control renderer)
     # - mode: "free" (draggable) or "fixed" (locks to a named camera defined in XML)
     # - You can also set: 'viewer_camera.name' (string) or 'viewer_camera.id' (int) when mode="fixed"
+    # - mode="track" follows the robot's centre of mass ('viewer_camera.body', 'viewer_camera.track_distance'); T toggles it.
+    #   Unset parameters fall back to the scene XML: <custom><text name="viewer_camera.mode" data="track"/></custom>
     'viewer_camera.mode': 'free'
     'viewer_camera.azimuth': -60.0
     'viewer_camera.elevation': -30.0

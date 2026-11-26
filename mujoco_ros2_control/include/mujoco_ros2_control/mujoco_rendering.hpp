@@ -59,6 +59,7 @@ private:
   void scroll_callback_impl(GLFWwindow *window, double xoffset, double yoffset);
 
   void set_camera_by_id(int cam_id);
+  void set_tracking(bool on);
 
   static MujocoRendering *instance_;
 
@@ -69,6 +70,8 @@ private:
   GLFWwindow *window_;
   mjvCamera mjv_cam_;
   int current_cam_id_{-1};  // -1 = free, >=0 = mjModel camera id
+  std::string track_body_name_;  // empty: the first floating body
+  double track_distance_{2.0};
 
   // Options for the rendering context and scene, all of these are hard coded to defaults.
   mjvOption mjv_opt_;
